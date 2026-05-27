@@ -47,7 +47,7 @@ def get_kinematic_loss(pred, target, dt=0.002):
     
     return loss_v, loss_a
 
-def train(split_type="random", attempt_name="attempt1_pure_mlp"):
+def train(split_type="random", attempt_name="attempt2_kinematic"):
     print(f"==================================================")
     print(f"🚀 Training [REBOOT - {attempt_name.upper()}] Model with [{split_type.upper()}] Split")
     print(f"==================================================")
@@ -97,6 +97,8 @@ def train(split_type="random", attempt_name="attempt1_pure_mlp"):
     for epoch in range(1, EPOCHS + 1):
         model.train()
         train_loss = 0.0
+        train_pos_loss = 0.0
+        train_kin_loss = 0.0
         
         train_pbar = tqdm(train_loader, desc=f"Epoch {epoch:03d}/{EPOCHS} [Train]", leave=False)
         for batch_X, batch_y in train_pbar:
@@ -105,22 +107,36 @@ def train(split_type="random", attempt_name="attempt1_pure_mlp"):
             optimizer.zero_grad()
             preds = model(batch_X)
             
-            # Position Loss (순수 MSE)
-            loss = criterion(preds, batch_y)
+            # Position Loss
+            loss_pos = criterion(preds, batch_y)
+            
+            # Kinematic Loss (L1 - 가속도 폭발 방지)
+            loss_v, loss_a = get_kinematic_loss(preds, batch_y, dt=0.002)
+            
+            # Total Loss (가중치 밸런싱)
+            kin_total = 0.01 * loss_v + 0.0001 * loss_a
+            loss = loss_pos + kin_total
             
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # 기울기 폭발 방지
             optimizer.step()
             
             bs = batch_X.size(0)
             train_loss += loss.item() * bs
+            train_pos_loss += loss_pos.item() * bs
+            train_kin_loss += kin_total.item() * bs
             
-            train_pbar.set_postfix({'MSE': f"{loss.item():.4f}"})
+            train_pbar.set_postfix({'Pos': f"{loss_pos.item():.4f}", 'Kin': f"{kin_total.item():.4f}"})
             
         train_loss /= len(train_loader.dataset)
+        train_pos_loss /= len(train_loader.dataset)
+        train_kin_loss /= len(train_loader.dataset)
         
         # 6. 평가 (Test Loss)
         model.eval()
         test_loss = 0.0
+        test_pos_loss = 0.0
+        test_kin_loss = 0.0
         
         test_pbar = tqdm(test_loader, desc=f"Epoch {epoch:03d}/{EPOCHS} [Test ]", leave=False)
         with torch.no_grad():
@@ -128,18 +144,25 @@ def train(split_type="random", attempt_name="attempt1_pure_mlp"):
                 batch_X, batch_y = batch_X.to(device), batch_y.to(device)
                 preds = model(batch_X)
                 
-                loss = criterion(preds, batch_y)
+                loss_pos = criterion(preds, batch_y)
+                loss_v, loss_a = get_kinematic_loss(preds, batch_y, dt=0.002)
+                kin_total = 0.01 * loss_v + 0.0001 * loss_a
+                loss = loss_pos + kin_total
                 
                 bs = batch_X.size(0)
                 test_loss += loss.item() * bs
-                test_pbar.set_postfix({'MSE': f"{loss.item():.4f}"})
+                test_pos_loss += loss_pos.item() * bs
+                test_kin_loss += kin_total.item() * bs
+                test_pbar.set_postfix({'Pos': f"{loss_pos.item():.4f}", 'Kin': f"{kin_total.item():.4f}"})
                 
         test_loss /= len(test_loader.dataset)
+        test_pos_loss /= len(test_loader.dataset)
+        test_kin_loss /= len(test_loader.dataset)
         
         scheduler.step(test_loss)
         
         if epoch % 1 == 0:
-            print(f"Epoch {epoch:03d}/{EPOCHS} | Train MSE: {train_loss:.5f} | Test MSE: {test_loss:.5f}")
+            print(f"Epoch {epoch:03d}/{EPOCHS} | Train [Pos: {train_pos_loss:.4f}, Kin: {train_kin_loss:.4f}] | Test [Pos: {test_pos_loss:.4f}, Kin: {test_kin_loss:.4f}]")
             
         if test_loss < best_loss:
             best_loss = test_loss
@@ -157,4 +180,4 @@ def train(split_type="random", attempt_name="attempt1_pure_mlp"):
     print(f"💾 Model saved to: {model_save_path}\n")
 
 if __name__ == "__main__":
-    train(split_type="random", attempt_name="attempt1_pure_mlp")
+    train(split_type="random", attempt_name="attempt2_kinematic")

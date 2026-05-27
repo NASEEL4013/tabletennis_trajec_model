@@ -42,7 +42,7 @@ class PhysicsDecoderMLP(nn.Module):
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 model_random = PhysicsDecoderMLP().to(device)
-model_path = os.path.join(DB_DIR, "mlp_standard_random_attempt1_pure_mlp.pth")
+model_path = os.path.join(DB_DIR, "mlp_standard_random_attempt2_kinematic.pth")
 if os.path.exists(model_path):
     try:
         model_random.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
@@ -50,7 +50,7 @@ if os.path.exists(model_path):
         print(f"Warning: Skipping weight load due to mismatch: {e}")
 model_random.eval()
 
-norm_path = os.path.join(DB_DIR, "mlp_norm_standard_random_attempt1_pure_mlp.npy")
+norm_path = os.path.join(DB_DIR, "mlp_norm_standard_random_attempt2_kinematic.npy")
 if os.path.exists(norm_path):
     norm_random = np.load(norm_path)
 else:
