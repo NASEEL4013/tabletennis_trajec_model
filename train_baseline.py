@@ -8,7 +8,7 @@ from torch.utils.data import TensorDataset, DataLoader
 from tqdm import tqdm
 
 DB_DIR = "/root/myresearch/database"
-EPOCHS = 500
+EPOCHS = 300
 BATCH_SIZE = 256
 LR = 0.001
 PATIENCE = 30  # Early Stopping 인내심
@@ -34,20 +34,13 @@ class PhysicsDecoderMLP(nn.Module):
         out = self.net(x)
         return out.view(-1, 500, 3)
 
-def get_kinematic_loss(pred, target, dt=0.002):
-    # Velocity (속도) - 폭발 방지를 위해 L1 Loss 사용
-    v_pred = (pred[:, 1:, :] - pred[:, :-1, :]) / dt
-    v_target = (target[:, 1:, :] - target[:, :-1, :]) / dt
-    loss_v = nn.L1Loss()(v_pred, v_target)
-    
-    # Acceleration (가속도) - 폭발 방지를 위해 L1 Loss 사용
-    a_pred = (v_pred[:, 1:, :] - v_pred[:, :-1, :]) / dt
-    a_target = (v_target[:, 1:, :] - v_target[:, :-1, :]) / dt
-    loss_a = nn.L1Loss()(a_pred, a_target)
-    
-    return loss_v, loss_a
+def get_chamfer_loss(pred, target):
+    # pred, target: [batch_size, 500, 3]
+    dist = torch.cdist(pred, target)
+    loss = dist.min(dim=2)[0].mean() + dist.min(dim=1)[0].mean()
+    return loss
 
-def train(split_type="random", attempt_name="attempt2_kinematic"):
+def train(split_type="random", attempt_name="attempt3_chamfer"):
     print(f"==================================================")
     print(f"🚀 Training [REBOOT - {attempt_name.upper()}] Model with [{split_type.upper()}] Split")
     print(f"==================================================")
@@ -98,7 +91,7 @@ def train(split_type="random", attempt_name="attempt2_kinematic"):
         model.train()
         train_loss = 0.0
         train_pos_loss = 0.0
-        train_kin_loss = 0.0
+        train_chamfer_loss = 0.0
         
         train_pbar = tqdm(train_loader, desc=f"Epoch {epoch:03d}/{EPOCHS} [Train]", leave=False)
         for batch_X, batch_y in train_pbar:
@@ -110,12 +103,11 @@ def train(split_type="random", attempt_name="attempt2_kinematic"):
             # Position Loss
             loss_pos = criterion(preds, batch_y)
             
-            # Kinematic Loss (L1 - 가속도 폭발 방지)
-            loss_v, loss_a = get_kinematic_loss(preds, batch_y, dt=0.002)
+            # Chamfer Loss (기하학적 형태 제약)
+            loss_chamfer = get_chamfer_loss(preds, batch_y)
             
             # Total Loss (가중치 밸런싱)
-            kin_total = 0.01 * loss_v + 0.0001 * loss_a
-            loss = loss_pos + kin_total
+            loss = loss_pos + 0.1 * loss_chamfer
             
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # 기울기 폭발 방지
@@ -124,19 +116,19 @@ def train(split_type="random", attempt_name="attempt2_kinematic"):
             bs = batch_X.size(0)
             train_loss += loss.item() * bs
             train_pos_loss += loss_pos.item() * bs
-            train_kin_loss += kin_total.item() * bs
+            train_chamfer_loss += loss_chamfer.item() * bs
             
-            train_pbar.set_postfix({'Pos': f"{loss_pos.item():.4f}", 'Kin': f"{kin_total.item():.4f}"})
+            train_pbar.set_postfix({'Pos': f"{loss_pos.item():.4f}", 'Chamfer': f"{loss_chamfer.item():.4f}"})
             
         train_loss /= len(train_loader.dataset)
         train_pos_loss /= len(train_loader.dataset)
-        train_kin_loss /= len(train_loader.dataset)
+        train_chamfer_loss /= len(train_loader.dataset)
         
         # 6. 평가 (Test Loss)
         model.eval()
         test_loss = 0.0
         test_pos_loss = 0.0
-        test_kin_loss = 0.0
+        test_chamfer_loss = 0.0
         
         test_pbar = tqdm(test_loader, desc=f"Epoch {epoch:03d}/{EPOCHS} [Test ]", leave=False)
         with torch.no_grad():
@@ -145,24 +137,23 @@ def train(split_type="random", attempt_name="attempt2_kinematic"):
                 preds = model(batch_X)
                 
                 loss_pos = criterion(preds, batch_y)
-                loss_v, loss_a = get_kinematic_loss(preds, batch_y, dt=0.002)
-                kin_total = 0.01 * loss_v + 0.0001 * loss_a
-                loss = loss_pos + kin_total
+                loss_chamfer = get_chamfer_loss(preds, batch_y)
+                loss = loss_pos + 0.1 * loss_chamfer
                 
                 bs = batch_X.size(0)
                 test_loss += loss.item() * bs
                 test_pos_loss += loss_pos.item() * bs
-                test_kin_loss += kin_total.item() * bs
-                test_pbar.set_postfix({'Pos': f"{loss_pos.item():.4f}", 'Kin': f"{kin_total.item():.4f}"})
+                test_chamfer_loss += loss_chamfer.item() * bs
+                test_pbar.set_postfix({'Pos': f"{loss_pos.item():.4f}", 'Chamfer': f"{loss_chamfer.item():.4f}"})
                 
         test_loss /= len(test_loader.dataset)
         test_pos_loss /= len(test_loader.dataset)
-        test_kin_loss /= len(test_loader.dataset)
+        test_chamfer_loss /= len(test_loader.dataset)
         
         scheduler.step(test_loss)
         
         if epoch % 1 == 0:
-            print(f"Epoch {epoch:03d}/{EPOCHS} | Train [Pos: {train_pos_loss:.4f}, Kin: {train_kin_loss:.4f}] | Test [Pos: {test_pos_loss:.4f}, Kin: {test_kin_loss:.4f}]")
+            print(f"Epoch {epoch:03d}/{EPOCHS} | Train [Pos: {train_pos_loss:.4f}, Chamfer: {train_chamfer_loss:.4f}] | Test [Pos: {test_pos_loss:.4f}, Chamfer: {test_chamfer_loss:.4f}]")
             
         if test_loss < best_loss:
             best_loss = test_loss
@@ -180,4 +171,4 @@ def train(split_type="random", attempt_name="attempt2_kinematic"):
     print(f"💾 Model saved to: {model_save_path}\n")
 
 if __name__ == "__main__":
-    train(split_type="random", attempt_name="attempt2_kinematic")
+    train(split_type="random", attempt_name="attempt3_chamfer")
