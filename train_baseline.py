@@ -13,34 +13,57 @@ BATCH_SIZE = 256
 LR = 0.001
 PATIENCE = 30  # Early Stopping 인내심
 
+class ResBlock(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Linear(dim, dim),
+            nn.LayerNorm(dim),
+            nn.ReLU(),
+            nn.Linear(dim, dim),
+            nn.LayerNorm(dim)
+        )
+    def forward(self, x):
+        return self.block(x) + x # Skip Connection (Pre-Activation)
+
 class PhysicsDecoderMLP(nn.Module):
     def __init__(self):
         super().__init__()
-        # 기교 없는 순수 Expanding MLP (병목현상 제거)
-        self.net = nn.Sequential(
+        # 차원 팽창 + ResNet (Skip Connection) 구조
+        self.in_layer = nn.Sequential(
             nn.Linear(8, 256),
             nn.LayerNorm(256),
-            nn.ReLU(),
+            nn.ReLU()
+        )
+        self.res1 = ResBlock(256)
+        
+        self.up1 = nn.Sequential(
             nn.Linear(256, 512),
             nn.LayerNorm(512),
-            nn.ReLU(),
+            nn.ReLU()
+        )
+        self.res2 = ResBlock(512)
+        
+        self.up2 = nn.Sequential(
             nn.Linear(512, 1024),
             nn.LayerNorm(1024),
-            nn.ReLU(),
-            nn.Linear(1024, 1500)
+            nn.ReLU()
         )
+        self.res3 = ResBlock(1024)
+        
+        self.out_layer = nn.Linear(1024, 1500)
         
     def forward(self, x):
-        out = self.net(x)
+        x = self.in_layer(x)
+        x = self.res1(x)
+        x = self.up1(x)
+        x = self.res2(x)
+        x = self.up2(x)
+        x = self.res3(x)
+        out = self.out_layer(x)
         return out.view(-1, 500, 3)
 
-def get_chamfer_loss(pred, target):
-    # pred, target: [batch_size, 500, 3]
-    dist = torch.cdist(pred, target)
-    loss = dist.min(dim=2)[0].mean() + dist.min(dim=1)[0].mean()
-    return loss
-
-def train(split_type="random", attempt_name="attempt3_chamfer"):
+def train(split_type="random", attempt_name="attempt4_resnet"):
     print(f"==================================================")
     print(f"🚀 Training [REBOOT - {attempt_name.upper()}] Model with [{split_type.upper()}] Split")
     print(f"==================================================")
@@ -75,7 +98,7 @@ def train(split_type="random", attempt_name="attempt3_chamfer"):
     print(f"Using device: {device}")
     
     model = PhysicsDecoderMLP().to(device)
-    criterion = nn.MSELoss() # 순수 MSE Loss (시도 1 베이스)
+    criterion = nn.L1Loss() # MAE Loss (중앙값 추적) 도입
     
     optimizer = optim.Adam(model.parameters(), lr=LR)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10, verbose=True)
@@ -90,8 +113,6 @@ def train(split_type="random", attempt_name="attempt3_chamfer"):
     for epoch in range(1, EPOCHS + 1):
         model.train()
         train_loss = 0.0
-        train_pos_loss = 0.0
-        train_chamfer_loss = 0.0
         
         train_pbar = tqdm(train_loader, desc=f"Epoch {epoch:03d}/{EPOCHS} [Train]", leave=False)
         for batch_X, batch_y in train_pbar:
@@ -100,14 +121,8 @@ def train(split_type="random", attempt_name="attempt3_chamfer"):
             optimizer.zero_grad()
             preds = model(batch_X)
             
-            # Position Loss
-            loss_pos = criterion(preds, batch_y)
-            
-            # Chamfer Loss (기하학적 형태 제약)
-            loss_chamfer = get_chamfer_loss(preds, batch_y)
-            
-            # Total Loss (가중치 밸런싱)
-            loss = loss_pos + 0.1 * loss_chamfer
+            # Position Loss (L1 Loss)
+            loss = criterion(preds, batch_y)
             
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # 기울기 폭발 방지
@@ -115,20 +130,14 @@ def train(split_type="random", attempt_name="attempt3_chamfer"):
             
             bs = batch_X.size(0)
             train_loss += loss.item() * bs
-            train_pos_loss += loss_pos.item() * bs
-            train_chamfer_loss += loss_chamfer.item() * bs
             
-            train_pbar.set_postfix({'Pos': f"{loss_pos.item():.4f}", 'Chamfer': f"{loss_chamfer.item():.4f}"})
+            train_pbar.set_postfix({'MAE': f"{loss.item():.4f}"})
             
         train_loss /= len(train_loader.dataset)
-        train_pos_loss /= len(train_loader.dataset)
-        train_chamfer_loss /= len(train_loader.dataset)
         
         # 6. 평가 (Test Loss)
         model.eval()
         test_loss = 0.0
-        test_pos_loss = 0.0
-        test_chamfer_loss = 0.0
         
         test_pbar = tqdm(test_loader, desc=f"Epoch {epoch:03d}/{EPOCHS} [Test ]", leave=False)
         with torch.no_grad():
@@ -136,24 +145,18 @@ def train(split_type="random", attempt_name="attempt3_chamfer"):
                 batch_X, batch_y = batch_X.to(device), batch_y.to(device)
                 preds = model(batch_X)
                 
-                loss_pos = criterion(preds, batch_y)
-                loss_chamfer = get_chamfer_loss(preds, batch_y)
-                loss = loss_pos + 0.1 * loss_chamfer
+                loss = criterion(preds, batch_y)
                 
                 bs = batch_X.size(0)
                 test_loss += loss.item() * bs
-                test_pos_loss += loss_pos.item() * bs
-                test_chamfer_loss += loss_chamfer.item() * bs
-                test_pbar.set_postfix({'Pos': f"{loss_pos.item():.4f}", 'Chamfer': f"{loss_chamfer.item():.4f}"})
+                test_pbar.set_postfix({'MAE': f"{loss.item():.4f}"})
                 
         test_loss /= len(test_loader.dataset)
-        test_pos_loss /= len(test_loader.dataset)
-        test_chamfer_loss /= len(test_loader.dataset)
         
         scheduler.step(test_loss)
         
         if epoch % 1 == 0:
-            print(f"Epoch {epoch:03d}/{EPOCHS} | Train [Pos: {train_pos_loss:.4f}, Chamfer: {train_chamfer_loss:.4f}] | Test [Pos: {test_pos_loss:.4f}, Chamfer: {test_chamfer_loss:.4f}]")
+            print(f"Epoch {epoch:03d}/{EPOCHS} | Train MAE: {train_loss:.5f} | Test MAE: {test_loss:.5f}")
             
         if test_loss < best_loss:
             best_loss = test_loss
@@ -167,8 +170,8 @@ def train(split_type="random", attempt_name="attempt3_chamfer"):
             break
             
     total_time = time.time() - start_time
-    print(f"✅ Training complete in {total_time:.1f}s! Best Test MSE: {best_loss:.5f}")
+    print(f"✅ Training complete in {total_time:.1f}s! Best Test MAE: {best_loss:.5f}")
     print(f"💾 Model saved to: {model_save_path}\n")
 
 if __name__ == "__main__":
-    train(split_type="random", attempt_name="attempt3_chamfer")
+    train(split_type="random", attempt_name="attempt4_resnet")

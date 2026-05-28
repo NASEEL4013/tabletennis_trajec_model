@@ -19,30 +19,60 @@ def rotate_2d(vector, angle):
 # ============================================================
 # AI 베이스라인 모델 (MLP) 정의 및 로드
 # ============================================================
+class ResBlock(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Linear(dim, dim),
+            nn.LayerNorm(dim),
+            nn.ReLU(),
+            nn.Linear(dim, dim),
+            nn.LayerNorm(dim)
+        )
+    def forward(self, x):
+        return self.block(x) + x # Skip Connection
+
 class PhysicsDecoderMLP(nn.Module):
     def __init__(self):
         super().__init__()
-        self.net = nn.Sequential(
+        # 차원 팽창 + ResNet (Skip Connection) 구조
+        self.in_layer = nn.Sequential(
             nn.Linear(8, 256),
             nn.LayerNorm(256),
-            nn.ReLU(),
+            nn.ReLU()
+        )
+        self.res1 = ResBlock(256)
+        
+        self.up1 = nn.Sequential(
             nn.Linear(256, 512),
             nn.LayerNorm(512),
-            nn.ReLU(),
+            nn.ReLU()
+        )
+        self.res2 = ResBlock(512)
+        
+        self.up2 = nn.Sequential(
             nn.Linear(512, 1024),
             nn.LayerNorm(1024),
-            nn.ReLU(),
-            nn.Linear(1024, 1500)
+            nn.ReLU()
         )
+        self.res3 = ResBlock(1024)
+        
+        self.out_layer = nn.Linear(1024, 1500)
         
     def forward(self, x):
-        out = self.net(x)
+        x = self.in_layer(x)
+        x = self.res1(x)
+        x = self.up1(x)
+        x = self.res2(x)
+        x = self.up2(x)
+        x = self.res3(x)
+        out = self.out_layer(x)
         return out.view(-1, 500, 3)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 model_random = PhysicsDecoderMLP().to(device)
-model_path = os.path.join(DB_DIR, "mlp_standard_random_attempt3_chamfer.pth")
+model_path = os.path.join(DB_DIR, "mlp_standard_random_attempt4_resnet.pth")
 if os.path.exists(model_path):
     try:
         model_random.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
@@ -50,7 +80,7 @@ if os.path.exists(model_path):
         print(f"Warning: Skipping weight load due to mismatch: {e}")
 model_random.eval()
 
-norm_path = os.path.join(DB_DIR, "mlp_norm_standard_random_attempt3_chamfer.npy")
+norm_path = os.path.join(DB_DIR, "mlp_norm_standard_random_attempt4_resnet.npy")
 if os.path.exists(norm_path):
     norm_random = np.load(norm_path)
 else:
