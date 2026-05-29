@@ -8,8 +8,8 @@ from torch.utils.data import TensorDataset, DataLoader
 from tqdm import tqdm
 
 DB_DIR = "/root/myresearch/database"
-EPOCHS = 300
-BATCH_SIZE = 256
+EPOCHS = 500
+BATCH_SIZE = 4096
 LR = 0.001
 PATIENCE = 30  # Early Stopping 인내심
 
@@ -63,7 +63,7 @@ class PhysicsDecoderMLP(nn.Module):
         out = self.out_layer(x)
         return out.view(-1, 500, 3)
 
-def train(split_type="random", attempt_name="attempt4_resnet"):
+def train(split_type="random", attempt_name="attempt5_resnet"):
     print(f"==================================================")
     print(f"🚀 Training [REBOOT - {attempt_name.upper()}] Model with [{split_type.upper()}] Split")
     print(f"==================================================")
@@ -90,8 +90,8 @@ def train(split_type="random", attempt_name="attempt4_resnet"):
     train_ds = TensorDataset(torch.tensor(X_train, dtype=torch.float32), torch.tensor(y_train, dtype=torch.float32))
     test_ds = TensorDataset(torch.tensor(X_test, dtype=torch.float32), torch.tensor(y_test, dtype=torch.float32))
     
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True)
-    test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=4, pin_memory=True)
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0, pin_memory=True)
+    test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0, pin_memory=True)
     
     # 4. 모델, 손실 함수, 옵티마이저 설정
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -174,4 +174,4 @@ def train(split_type="random", attempt_name="attempt4_resnet"):
     print(f"💾 Model saved to: {model_save_path}\n")
 
 if __name__ == "__main__":
-    train(split_type="random", attempt_name="attempt4_resnet")
+    train(split_type="random", attempt_name="attempt5_resnet")
