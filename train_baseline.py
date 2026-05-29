@@ -63,7 +63,7 @@ class PhysicsDecoderMLP(nn.Module):
         out = self.out_layer(x)
         return out.view(-1, 500, 3)
 
-def train(split_type="random", attempt_name="attempt5_resnet"):
+def train(split_type="random", attempt_name="attempt7_cosine_loss"):
     print(f"==================================================")
     print(f"🚀 Training [REBOOT - {attempt_name.upper()}] Model with [{split_type.upper()}] Split")
     print(f"==================================================")
@@ -127,11 +127,33 @@ def train(split_type="random", attempt_name="attempt5_resnet"):
         total_active_elements = mask.sum() * 3
         
         if total_active_elements > 0:
-            loss = error.sum() / total_active_elements
+            pos_loss = error.sum() / total_active_elements
         else:
-            loss = error.sum() * 0.0 # fallback
+            pos_loss = error.sum() * 0.0 # fallback
             
-        return loss, error.sum(), total_active_elements
+        # 4. 방향 일치 (Cosine Similarity) Loss 추가
+        pred_vel = preds[:, 1:, :] - preds[:, :-1, :]
+        true_vel = batch_y[:, 1:, :] - batch_y[:, :-1, :]
+        
+        cos_sim = torch.nn.functional.cosine_similarity(pred_vel, true_vel, dim=-1) # (batch_size, 499)
+        
+        # t와 t+1 모두 유효한(마스킹 안 된) 스텝만 비교에 포함
+        vel_mask = mask[:, :-1] * mask[:, 1:] # (batch_size, 499)
+        
+        dir_error = (1.0 - cos_sim) * vel_mask
+        total_active_vels = vel_mask.sum()
+        
+        if total_active_vels > 0:
+            dir_loss = dir_error.sum() / total_active_vels
+        else:
+            dir_loss = dir_error.sum() * 0.0
+            
+        # 최종 Loss: 위치 오차(pos_loss) + 방향 오차 가중치(alpha)
+        alpha = 1.0
+        total_loss = pos_loss + alpha * dir_loss
+            
+        # 반환값: 역전파용 total_loss, 그리고 실제 MAE 로깅용 위치 오차합(error.sum())
+        return total_loss, error.sum(), total_active_elements
 
     # 5. 학습 루프
     for epoch in range(1, EPOCHS + 1):
@@ -199,4 +221,4 @@ def train(split_type="random", attempt_name="attempt5_resnet"):
     print(f"💾 Model saved to: {model_save_path}\n")
 
 if __name__ == "__main__":
-    train(split_type="random", attempt_name="attempt6_mask")
+    train(split_type="random", attempt_name="attempt7_cosine_loss")
