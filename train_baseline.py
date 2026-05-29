@@ -109,10 +109,35 @@ def train(split_type="random", attempt_name="attempt5_resnet"):
     
     model_save_path = os.path.join(DB_DIR, f"mlp_standard_{split_type}_{attempt_name}.pth")
     
+    def compute_masked_loss(preds, batch_y):
+        # 1. 바닥 충돌 패딩 마스킹 (Z <= -0.75)
+        # batch_y shape: (batch_size, 500, 3)
+        z_coords = batch_y[:, :, 2]
+        is_floor = z_coords <= -0.75
+        
+        # cumsum을 사용하여 바닥에 처음 닿은 시점(inclusive) 이후의 마스크 생성
+        # hit_floor_cumsum == 0 인 구간만 True (살림)
+        mask = (is_floor.cumsum(dim=1) == 0).float() # (batch_size, 500)
+        
+        # 2. 오차 계산 (Mask 적용)
+        error = torch.abs(preds - batch_y) * mask.unsqueeze(-1)
+        
+        # 3. 평균 나누기 (활성화된 스텝 개수로만 나눔)
+        # mask.sum()은 전체 배치 내에서 살려진 총 스텝 개수
+        total_active_elements = mask.sum() * 3
+        
+        if total_active_elements > 0:
+            loss = error.sum() / total_active_elements
+        else:
+            loss = error.sum() * 0.0 # fallback
+            
+        return loss, error.sum(), total_active_elements
+
     # 5. 학습 루프
     for epoch in range(1, EPOCHS + 1):
         model.train()
-        train_loss = 0.0
+        total_train_error = 0.0
+        total_train_active = 0.0
         
         train_pbar = tqdm(train_loader, desc=f"Epoch {epoch:03d}/{EPOCHS} [Train]", leave=False)
         for batch_X, batch_y in train_pbar:
@@ -121,23 +146,23 @@ def train(split_type="random", attempt_name="attempt5_resnet"):
             optimizer.zero_grad()
             preds = model(batch_X)
             
-            # Position Loss (L1 Loss)
-            loss = criterion(preds, batch_y)
+            loss, batch_error_sum, batch_active_count = compute_masked_loss(preds, batch_y)
             
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # 기울기 폭발 방지
             optimizer.step()
             
-            bs = batch_X.size(0)
-            train_loss += loss.item() * bs
+            total_train_error += batch_error_sum.item()
+            total_train_active += batch_active_count.item()
             
             train_pbar.set_postfix({'MAE': f"{loss.item():.4f}"})
             
-        train_loss /= len(train_loader.dataset)
+        train_loss = total_train_error / total_train_active if total_train_active > 0 else 0.0
         
         # 6. 평가 (Test Loss)
         model.eval()
-        test_loss = 0.0
+        total_test_error = 0.0
+        total_test_active = 0.0
         
         test_pbar = tqdm(test_loader, desc=f"Epoch {epoch:03d}/{EPOCHS} [Test ]", leave=False)
         with torch.no_grad():
@@ -145,13 +170,13 @@ def train(split_type="random", attempt_name="attempt5_resnet"):
                 batch_X, batch_y = batch_X.to(device), batch_y.to(device)
                 preds = model(batch_X)
                 
-                loss = criterion(preds, batch_y)
+                loss, batch_error_sum, batch_active_count = compute_masked_loss(preds, batch_y)
                 
-                bs = batch_X.size(0)
-                test_loss += loss.item() * bs
+                total_test_error += batch_error_sum.item()
+                total_test_active += batch_active_count.item()
                 test_pbar.set_postfix({'MAE': f"{loss.item():.4f}"})
                 
-        test_loss /= len(test_loader.dataset)
+        test_loss = total_test_error / total_test_active if total_test_active > 0 else 0.0
         
         scheduler.step(test_loss)
         
@@ -174,4 +199,4 @@ def train(split_type="random", attempt_name="attempt5_resnet"):
     print(f"💾 Model saved to: {model_save_path}\n")
 
 if __name__ == "__main__":
-    train(split_type="random", attempt_name="attempt5_resnet")
+    train(split_type="random", attempt_name="attempt6_mask")

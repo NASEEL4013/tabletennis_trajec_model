@@ -72,7 +72,7 @@ class PhysicsDecoderMLP(nn.Module):
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 model_random = PhysicsDecoderMLP().to(device)
-model_path = os.path.join(DB_DIR, "mlp_standard_random_attempt5_resnet.pth")
+model_path = os.path.join(DB_DIR, "mlp_standard_random_attempt6_mask.pth")
 if os.path.exists(model_path):
     try:
         model_random.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
@@ -80,7 +80,7 @@ if os.path.exists(model_path):
         print(f"Warning: Skipping weight load due to mismatch: {e}")
 model_random.eval()
 
-norm_path = os.path.join(DB_DIR, "mlp_norm_standard_random_attempt5_resnet.npy")
+norm_path = os.path.join(DB_DIR, "mlp_norm_standard_random_attempt6_mask.npy")
 if os.path.exists(norm_path):
     norm_random = np.load(norm_path)
 else:
@@ -253,6 +253,13 @@ def simulate(speed, theta_v, omega_top, omega_side, hit_x, hit_y, hit_z, theta_h
             input_tensor = torch.tensor(input_norm, dtype=torch.float32).unsqueeze(0).to(device)
             with torch.no_grad():
                 pred_traj = model(input_tensor).cpu().numpy()[0]
+                
+            # --- Post-processing (Floor Cutoff Padding) ---
+            hit_floor_indices = np.where(pred_traj[:, 2] <= -0.75)[0]
+            if len(hit_floor_indices) > 0:
+                first_hit = hit_floor_indices[0]
+                pred_traj[first_hit:] = pred_traj[first_hit]
+                
             x_m, y_m, z_m = pred_traj[:, 0], pred_traj[:, 1], pred_traj[:, 2]
         else:
             x_m, y_m, z_m = [0]*500, [0]*500, [0]*500
