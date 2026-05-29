@@ -4,7 +4,7 @@ import time
 from app import traditional_physics_solver
 
 DB_DIR = "/root/myresearch/database"
-NUM_SAMPLES = 2000000
+NUM_SAMPLES = 3000000
 
 def generate_samples(num_samples):
     # 입력: [speed, theta_v_deg, omega_top, omega_side, hit_x, hit_y, hit_z, theta_h]
@@ -21,14 +21,14 @@ def generate_samples(num_samples):
             print(f"Progress: {i}/{num_samples} (Elapsed: {elapsed:.2f}s)")
             
         # 파라미터 무작위 샘플링 (프로 레벨 강스매시 및 하이 스핀 커버)
-        speed = np.random.uniform(1.0, 100.0)
-        theta_v = np.random.uniform(-85.0, 85.0)
-        omega_top = np.random.uniform(-800.0, 800.0)
-        omega_side = np.random.uniform(-800.0, 800.0)
+        speed = np.random.uniform(1.0, 80.0)
+        theta_v = np.random.uniform(-50.0, 50.0)
+        omega_top = np.random.uniform(-200.0, 200.0)
+        omega_side = np.random.uniform(-200.0, 200.0)
         hit_x = np.random.uniform(-3.0, 3.0)
         hit_y = np.random.uniform(-4.0, 0.0)
-        hit_z = np.random.uniform(-0.7, 2.0)
-        theta_h = np.random.uniform(-80.0, 80.0)
+        hit_z = np.random.uniform(-0.76, 1.5)
+        theta_h = np.random.uniform(-65.0, 65.0)
         
         inputs[i] = np.round([speed, theta_v, omega_top, omega_side, hit_x, hit_y, hit_z, theta_h], 3)
         

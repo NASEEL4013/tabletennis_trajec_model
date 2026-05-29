@@ -65,11 +65,6 @@
 
 스무딩 현상(U자 궤적)과 궤도 불안정 문제를 해결하기 위해 진행한 실험들을 이곳에 기록합니다.
 
-> [!WARNING]
-> **🚨 2026-05-27 중대 발견:** 시도 1과 시도 2를 진행한 후 결과를 시각화했을 때, `app.py`가 새롭게 훈련된 모델(`mlp_standard_random.pth`)이 아닌 폐기했던 512차원 병목 모델(`mlp_kinematic_random.pth`)을 불러오고 있었음이 발각됨! 즉, 우리가 봤던 '구불거림'과 'U자 뭉개짐'은 리부트 전 옛날 모델의 결과였음. 따라서 '순수 넓은 구조(Expanding MLP)'의 진짜 효과를 검증하기 위해 시도 1을 처음부터 올바르게 다시 진행함!
-
-*🚨 과거 시도(1~4)는 좁은 512차원 병목 구조로 인한 태생적 한계로 판단되어 전부 폐기하고, 병목을 제거한 순수 Expanding MLP로 다시 처음(시도 1)부터 시작합니다.*
-
 1. **시도 1 (Reboot - Back to Basics):**
    - **날짜:** 2026-05-26
    - **내용:** 순수 Expanding MLP (`1024 -> 1500`) + 기본 MSE Loss
@@ -95,6 +90,34 @@
    - **결과:** **울퉁불퉁한 지렁이 궤적 발생 (Wobbling/Jittering)**. ResNet 덕분에 '날카로운(High-frequency)' 정보를 표현할 근육은 생겼고 L1 Loss 덕분에 둥글게 퉁치려는 현상은 막았으나, 데이터 밀도가 너무 낮아(차원의 저주) 바운드 타이밍을 정확히 확신하지 못함. 결과적으로 이리저리 찍어 맞추려다 바운드 지점 근처에서 심하게 요동치는(출렁거리는) 기괴한 궤적이 만들어짐.
    ![시도 4 지렁이 궤적](/root/myresearch/attempt4_resnet_fail.png)
 
+ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ데이터 증강 및 파라미터 범위 축소ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+이전 파라미터 :
+speed = np.random.uniform(1.0, 100.0)
+        theta_v = np.random.uniform(-85.0, 85.0)
+        omega_top = np.random.uniform(-800.0, 800.0)
+        omega_side = np.random.uniform(-800.0, 800.0)
+        hit_x = np.random.uniform(-3.0, 3.0)
+        hit_y = np.random.uniform(-4.0, 0.0)
+        hit_z = np.random.uniform(-0.7, 2.0)
+        theta_h = np.random.uniform(-80.0, 80.0)
+
+이후 파라미터 :
+speed = np.random.uniform(1.0, 80.0)
+        theta_v = np.random.uniform(-50.0, 50.0)
+        omega_top = np.random.uniform(-200.0, 200.0)
+        omega_side = np.random.uniform(-200.0, 200.0)
+        hit_x = np.random.uniform(-3.0, 3.0)
+        hit_y = np.random.uniform(-4.0, 0.0)
+        hit_z = np.random.uniform(-0.76, 1.5)
+        theta_h = np.random.uniform(-65.0, 65.0)
+
+데이터셋 갯수 : 200만개 -> 300만개
+ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+1. **시도 1 (Reboot - Back to Basics):**
+   - **날짜:** 2026-05-26
+   - **내용:** 순수 Expanding MLP (`1024 -> 1500`) + 기본 MSE Loss
+   - **결과:** 엄청난 파도타기(심각한 궤도 구불거림, Wavy artifacts) 현상이 발생함. 병목(Bottleneck)을 제거하고 차원을 크게 넓혔음에도 궤도가 마구잡이로 요동침.
+   ![시도 1 진짜 궤적: 심각한 파도타기 현상](/root/myresearch/attempt1_protoMLP.png)
 ---
 
 ## 📁 디렉토리 구조 (최신화 완료)
