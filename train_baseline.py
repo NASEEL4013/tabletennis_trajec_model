@@ -63,7 +63,7 @@ class PhysicsDecoderMLP(nn.Module):
         out = self.out_layer(x)
         return out.view(-1, 500, 3)
 
-def train(split_type="random", attempt_name="attempt7_cosine_loss"):
+def train(split_type="random", attempt_name="attempt8_kinematic_loss"):
     print(f"==================================================")
     print(f"🚀 Training [REBOOT - {attempt_name.upper()}] Model with [{split_type.upper()}] Split")
     print(f"==================================================")
@@ -131,26 +131,37 @@ def train(split_type="random", attempt_name="attempt7_cosine_loss"):
         else:
             pos_loss = error.sum() * 0.0 # fallback
             
-        # 4. 방향 일치 (Cosine Similarity) Loss 추가
+        # 4. 물리 미분(Kinematic Derivative) Loss 추가
         pred_vel = preds[:, 1:, :] - preds[:, :-1, :]
         true_vel = batch_y[:, 1:, :] - batch_y[:, :-1, :]
-        
-        cos_sim = torch.nn.functional.cosine_similarity(pred_vel, true_vel, dim=-1) # (batch_size, 499)
         
         # t와 t+1 모두 유효한(마스킹 안 된) 스텝만 비교에 포함
         vel_mask = mask[:, :-1] * mask[:, 1:] # (batch_size, 499)
         
-        dir_error = (1.0 - cos_sim) * vel_mask
-        total_active_vels = vel_mask.sum()
+        vel_error = torch.abs(pred_vel - true_vel) * vel_mask.unsqueeze(-1)
+        total_active_vels = vel_mask.sum() * 3
         
         if total_active_vels > 0:
-            dir_loss = dir_error.sum() / total_active_vels
+            vel_loss = vel_error.sum() / total_active_vels
         else:
-            dir_loss = dir_error.sum() * 0.0
+            vel_loss = vel_error.sum() * 0.0
             
-        # 최종 Loss: 위치 오차(pos_loss) + 방향 오차 가중치(alpha)
-        alpha = 1.0
-        total_loss = pos_loss + alpha * dir_loss
+        # 가속도 (2차 미분)
+        pred_acc = pred_vel[:, 1:, :] - pred_vel[:, :-1, :]
+        true_acc = true_vel[:, 1:, :] - true_vel[:, :-1, :]
+        
+        acc_mask = vel_mask[:, :-1] * vel_mask[:, 1:] # (batch_size, 498)
+        
+        acc_error = torch.abs(pred_acc - true_acc) * acc_mask.unsqueeze(-1)
+        total_active_accs = acc_mask.sum() * 3
+        
+        if total_active_accs > 0:
+            acc_loss = acc_error.sum() / total_active_accs
+        else:
+            acc_loss = acc_error.sum() * 0.0
+            
+        # 최종 Loss: 위치 오차(pos_loss) + 속도(vel_loss) + 가속도(acc_loss)
+        total_loss = pos_loss + 1.0 * vel_loss + 1.0 * acc_loss
             
         # 반환값: 역전파용 total_loss, 그리고 실제 MAE 로깅용 위치 오차합(error.sum())
         return total_loss, error.sum(), total_active_elements
@@ -221,4 +232,4 @@ def train(split_type="random", attempt_name="attempt7_cosine_loss"):
     print(f"💾 Model saved to: {model_save_path}\n")
 
 if __name__ == "__main__":
-    train(split_type="random", attempt_name="attempt7_cosine_loss")
+    train(split_type="random", attempt_name="attempt8_kinematic_loss")
