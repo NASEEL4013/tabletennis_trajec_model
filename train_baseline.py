@@ -63,7 +63,7 @@ class PhysicsDecoderMLP(nn.Module):
         out = self.out_layer(x)
         return out.view(-1, 500, 3)
 
-def train(split_type="random", attempt_name="attempt8_kinematic_loss"):
+def train(split_type="random", attempt_name="attempt9_strong_kinematic"):
     print(f"==================================================")
     print(f"🚀 Training [REBOOT - {attempt_name.upper()}] Model with [{split_type.upper()}] Split")
     print(f"==================================================")
@@ -161,7 +161,9 @@ def train(split_type="random", attempt_name="attempt8_kinematic_loss"):
             acc_loss = acc_error.sum() * 0.0
             
         # 최종 Loss: 위치 오차(pos_loss) + 속도(vel_loss) + 가속도(acc_loss)
-        total_loss = pos_loss + 1.0 * vel_loss + 1.0 * acc_loss
+        vel_weight = 3.0
+        acc_weight = 5.0
+        total_loss = pos_loss + vel_weight * vel_loss + acc_weight * acc_loss
             
         # 반환값: 역전파용 total_loss, 그리고 실제 MAE 로깅용 위치 오차합(error.sum())
         return total_loss, error.sum(), total_active_elements
@@ -232,4 +234,4 @@ def train(split_type="random", attempt_name="attempt8_kinematic_loss"):
     print(f"💾 Model saved to: {model_save_path}\n")
 
 if __name__ == "__main__":
-    train(split_type="random", attempt_name="attempt8_kinematic_loss")
+    train(split_type="random", attempt_name="attempt9_strong_kinematic")
