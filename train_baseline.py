@@ -3,6 +3,7 @@ import time
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader
 from tqdm import tqdm
@@ -13,57 +14,52 @@ BATCH_SIZE = 4096
 LR = 0.001
 PATIENCE = 30  # Early Stopping 인내심
 
-class ResBlock(nn.Module):
-    def __init__(self, dim):
-        super().__init__()
-        self.block = nn.Sequential(
-            nn.Linear(dim, dim),
-            nn.LayerNorm(dim),
-            nn.ReLU(),
-            nn.Linear(dim, dim),
-            nn.LayerNorm(dim)
-        )
-    def forward(self, x):
-        return self.block(x) + x # Skip Connection (Pre-Activation)
-
-class PhysicsDecoderMLP(nn.Module):
+class CNNDecoder(nn.Module):
     def __init__(self):
         super().__init__()
-        # 차원 팽창 + ResNet (Skip Connection) 구조
-        self.in_layer = nn.Sequential(
-            nn.Linear(8, 256),
-            nn.LayerNorm(256),
+        # 시계열의 씨앗(Seed) 생성: 8 -> 2560 (256채널 x 10프레임)
+        self.fc = nn.Sequential(
+            nn.Linear(8, 256 * 10),
             nn.ReLU()
         )
-        self.res1 = ResBlock(256)
         
+        # 1차 확대: 10프레임 -> 20프레임
         self.up1 = nn.Sequential(
-            nn.Linear(256, 512),
-            nn.LayerNorm(512),
+            nn.Upsample(scale_factor=2, mode='nearest'),
+            nn.Conv1d(256, 128, kernel_size=3, padding=1),
+            nn.BatchNorm1d(128),
             nn.ReLU()
         )
-        self.res2 = ResBlock(512)
         
+        # 2차 확대: 20프레임 -> 100프레임
         self.up2 = nn.Sequential(
-            nn.Linear(512, 1024),
-            nn.LayerNorm(1024),
+            nn.Upsample(scale_factor=5, mode='nearest'),
+            nn.Conv1d(128, 64, kernel_size=3, padding=1),
+            nn.BatchNorm1d(64),
             nn.ReLU()
         )
-        self.res3 = ResBlock(1024)
         
-        self.out_layer = nn.Linear(1024, 1500)
+        # 3차 확대: 100프레임 -> 500프레임
+        self.up3 = nn.Sequential(
+            nn.Upsample(scale_factor=5, mode='nearest'),
+            nn.Conv1d(64, 32, kernel_size=3, padding=1),
+            nn.BatchNorm1d(32),
+            nn.ReLU()
+        )
+        
+        # 최종 좌표 출력: 32채널 -> 3채널 (X, Y, Z)
+        self.out_conv = nn.Conv1d(32, 3, kernel_size=3, padding=1)
         
     def forward(self, x):
-        x = self.in_layer(x)
-        x = self.res1(x)
+        x = self.fc(x)
+        x = x.view(-1, 256, 10) # (Batch, Channels, Length)
         x = self.up1(x)
-        x = self.res2(x)
         x = self.up2(x)
-        x = self.res3(x)
-        out = self.out_layer(x)
-        return out.view(-1, 500, 3)
+        x = self.up3(x)
+        x = self.out_conv(x)
+        return x.transpose(1, 2) # (Batch, 500, 3) 꼴로 원복
 
-def train(split_type="random", attempt_name="attempt9_strong_kinematic"):
+def train(split_type="random", attempt_name="attempt10_cnn_decoder"):
     print(f"==================================================")
     print(f"🚀 Training [REBOOT - {attempt_name.upper()}] Model with [{split_type.upper()}] Split")
     print(f"==================================================")
@@ -97,7 +93,7 @@ def train(split_type="random", attempt_name="attempt9_strong_kinematic"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
-    model = PhysicsDecoderMLP().to(device)
+    model = CNNDecoder().to(device)
     criterion = nn.L1Loss() # MAE Loss (중앙값 추적) 도입
     
     optimizer = optim.Adam(model.parameters(), lr=LR)
@@ -160,10 +156,14 @@ def train(split_type="random", attempt_name="attempt9_strong_kinematic"):
         else:
             acc_loss = acc_error.sum() * 0.0
             
-        # 최종 Loss: 위치 오차(pos_loss) + 속도(vel_loss) + 가속도(acc_loss)
-        vel_weight = 3.0
-        acc_weight = 5.0
-        total_loss = pos_loss + vel_weight * vel_loss + acc_weight * acc_loss
+        # ----------------------------------------------------
+        # 시도 10: CNN 아키텍처 도입으로 인한 손실 함수 극단적 단순화
+        # 유저 요청에 따라 속도, 가속도 Loss마저 전부 빼고 
+        # 오직 위치 오차(pos_loss)만으로 훈련하여 CNN 고유의 능력을 테스트합니다.
+        # ----------------------------------------------------
+        vel_weight = 0.0
+        acc_weight = 0.0
+        total_loss = pos_loss
             
         # 반환값: 역전파용 total_loss, 그리고 실제 MAE 로깅용 위치 오차합(error.sum())
         return total_loss, error.sum(), total_active_elements
@@ -234,4 +234,4 @@ def train(split_type="random", attempt_name="attempt9_strong_kinematic"):
     print(f"💾 Model saved to: {model_save_path}\n")
 
 if __name__ == "__main__":
-    train(split_type="random", attempt_name="attempt9_strong_kinematic")
+    train(split_type="random", attempt_name="attempt11_cnn_upsample")

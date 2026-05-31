@@ -161,6 +161,13 @@ speed = np.random.uniform(1.0, 80.0)
    - **결과:** **과도한 페널티로 인한 역효과 (Over-smoothing) 발생.** 가속도 오차에 대한 페널티가 너무 거대해지자, 모델은 바운드 순간의 스파이크를 감당하지 못하고, 오차 폭탄을 피하기 위해 바운드 지점을 스무스하게 둥글려버리는 꼼수(U자 궤적 및 허공에 떠다니는 현상)를 다시 학습함. (시도 2와 유사한 스무딩 현상 재발)
    ![시도 9 가중치 과다로 인한 과도한 스무딩](/root/myresearch/attempt9_strong_kinematic.png)
 
+10. **시도 10 (1D CNN Decoder 도입 - 구조적 한계 극복):**
+    - **날짜:** 2026-05-30
+    - **내용:** MLP 구조가 가지는 연속적 보간(Interpolation) 특성 때문에 바운드 타이밍이 미세하게 이동할 때 궤적이 U자로 뭉개지는 현상(스무딩)이 근본적 원인임을 파악함.
+    - **해결책:** 속도/가속도 등 복잡한 Loss를 모두 제거하고 오직 `pos_loss`만 남긴 채, 모델 아키텍처를 `1D CNN Decoder`로 전면 교체. (Checkerboard Artifact 방지를 위해 Overlap 커널 K=9 적용)
+    - **결과:** **심각한 고주파 노이즈(지그재그) 발생.** `kernel_size=9`와 `stride=5`의 조합이 겹치는 횟수(Overlap)를 불균등하게 만들어(1번 겹쳤다 2번 겹쳤다 반복) '체커보드 아티팩트'를 정통으로 유발함. 게다가 속도/가속도 Loss를 제거하여 이러한 고주파 노이즈를 억제할 안전장치마저 없었음.
+    ![시도 10 체커보드 아티팩트 발생](/root/myresearch/attempt10_checkerboard.png)
+
 ---
 
 ## 📁 디렉토리 구조 (최신화 완료)
@@ -177,3 +184,6 @@ speed = np.random.uniform(1.0, 80.0)
     ├── mlp_norm_standard_random.npy # 모델 입력 전처리 스케일러 저장
     └── mlp_standard_random.pth # 훈련 완료된 모델 (Standard MLP)
 ```
+
+## 추후 보강해야할 요소
+1. 공이 바닥에 닿는 경우 처리
