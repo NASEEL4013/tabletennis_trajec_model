@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 DB_DIR = "/root/myresearch/database"
 EPOCHS = 500
-BATCH_SIZE = 4096
+BATCH_SIZE = 8192
 LR = 0.001
 PATIENCE = 30  # Early Stopping 인내심
 
@@ -90,6 +90,7 @@ def train(split_type="random", attempt_name="attempt10_cnn_decoder"):
     test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0, pin_memory=True)
     
     # 4. 모델, 손실 함수, 옵티마이저 설정
+    torch.backends.cudnn.benchmark = True
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
@@ -98,6 +99,7 @@ def train(split_type="random", attempt_name="attempt10_cnn_decoder"):
     
     optimizer = optim.Adam(model.parameters(), lr=LR)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10, verbose=True)
+    scaler = torch.cuda.amp.GradScaler()
     
     best_loss = float('inf')
     patience_counter = 0
@@ -111,9 +113,9 @@ def train(split_type="random", attempt_name="attempt10_cnn_decoder"):
         z_coords = batch_y[:, :, 2]
         is_floor = z_coords <= -0.75
         
-        # cumsum을 사용하여 바닥에 처음 닿은 시점(inclusive) 이후의 마스크 생성
-        # hit_floor_cumsum == 0 인 구간만 True (살림)
-        mask = (is_floor.cumsum(dim=1) == 0).float() # (batch_size, 500)
+        # cumsum을 사용하여 바닥에 처음 닿은 시점(inclusive)까지 마스크에 포함시킴
+        # 기존 cumsum == 0 은 바닥에 닿는 순간 자체를 마스킹해버려 학습을 못하는 심각한 논리적 버그가 있었음.
+        mask = (is_floor.cumsum(dim=1) <= 1).float() # (batch_size, 500)
         
         # 2. 오차 계산 (Mask 적용)
         error = torch.abs(preds - batch_y) * mask.unsqueeze(-1)
@@ -157,13 +159,13 @@ def train(split_type="random", attempt_name="attempt10_cnn_decoder"):
             acc_loss = acc_error.sum() * 0.0
             
         # ----------------------------------------------------
-        # 시도 10: CNN 아키텍처 도입으로 인한 손실 함수 극단적 단순화
-        # 유저 요청에 따라 속도, 가속도 Loss마저 전부 빼고 
-        # 오직 위치 오차(pos_loss)만으로 훈련하여 CNN 고유의 능력을 테스트합니다.
+        # 시도 12: 물리 브레이크(Kinematic Loss) 복구
+        # CNN 구조(Upsample+Conv1d)로 체커보드는 해결했으나 궤적이 흔들림.
+        # 속도/가속도 페널티를 부활시켜 물리적으로 부드러운 포물선을 그리도록 강제함.
         # ----------------------------------------------------
-        vel_weight = 0.0
-        acc_weight = 0.0
-        total_loss = pos_loss
+        vel_weight = 1.0
+        acc_weight = 0.1
+        total_loss = pos_loss + vel_weight * vel_loss + acc_weight * acc_loss
             
         # 반환값: 역전파용 total_loss, 그리고 실제 MAE 로깅용 위치 오차합(error.sum())
         return total_loss, error.sum(), total_active_elements
@@ -176,16 +178,18 @@ def train(split_type="random", attempt_name="attempt10_cnn_decoder"):
         
         train_pbar = tqdm(train_loader, desc=f"Epoch {epoch:03d}/{EPOCHS} [Train]", leave=False)
         for batch_X, batch_y in train_pbar:
-            batch_X, batch_y = batch_X.to(device), batch_y.to(device)
+            batch_X, batch_y = batch_X.to(device, non_blocking=True), batch_y.to(device, non_blocking=True)
             
             optimizer.zero_grad()
-            preds = model(batch_X)
+            with torch.cuda.amp.autocast():
+                preds = model(batch_X)
+                loss, batch_error_sum, batch_active_count = compute_masked_loss(preds, batch_y)
             
-            loss, batch_error_sum, batch_active_count = compute_masked_loss(preds, batch_y)
-            
-            loss.backward()
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # 기울기 폭발 방지
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
             
             total_train_error += batch_error_sum.item()
             total_train_active += batch_active_count.item()
@@ -234,4 +238,4 @@ def train(split_type="random", attempt_name="attempt10_cnn_decoder"):
     print(f"💾 Model saved to: {model_save_path}\n")
 
 if __name__ == "__main__":
-    train(split_type="random", attempt_name="attempt11_cnn_upsample")
+    train(split_type="random", attempt_name="attempt12_cnn_amp")

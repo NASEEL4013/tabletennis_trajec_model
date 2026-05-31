@@ -168,6 +168,18 @@ speed = np.random.uniform(1.0, 80.0)
     - **결과:** **심각한 고주파 노이즈(지그재그) 발생.** `kernel_size=9`와 `stride=5`의 조합이 겹치는 횟수(Overlap)를 불균등하게 만들어(1번 겹쳤다 2번 겹쳤다 반복) '체커보드 아티팩트'를 정통으로 유발함. 게다가 속도/가속도 Loss를 제거하여 이러한 고주파 노이즈를 억제할 안전장치마저 없었음.
     ![시도 10 체커보드 아티팩트 발생](/root/myresearch/attempt10_checkerboard.png)
 
+11. **시도 11 (Upsample + Conv1d 및 Loss 절제 연구):**
+    - **날짜:** 2026-05-31
+    - **내용:** 시도 10의 체커보드 아티팩트를 해결하기 위해 `ConvTranspose1d`를 폐기하고, 최신 표준 디코더 구조인 `nn.Upsample` + `nn.Conv1d` 조합으로 개편함. CNN의 순수 형태 포착 능력을 테스트하기 위해 속도/가속도 Loss는 계속 비활성화(0.0) 상태를 유지함.
+    - **결과:** **체커보드 지그재그 노이즈 완전 해결, 그러나 궤적이 흔들림(Wobbling) 발생.** 구조적 개편으로 고주파 노이즈는 완벽히 사라졌으나, 물리적 제약(속도/가속도 페널티)이 없기 때문에 CNN이 점들을 정답 근처에 국소적으로만 찍어낼 뿐 매끄러운 포물선 곡선을 그리지 못하고 벌레가 기어가는 듯한 구불구불한 궤적을 만듦. (Global Smoothness의 부재)
+    ![시도 11 궤적 흔들림(Wobbling)](/root/myresearch/attempt11_wobble.png)
+
+12. **시도 12 (물리 Loss 복구 및 가속 도입 - 실패):**
+    - **날짜:** 2026-05-31
+    - **내용:** 시도 11의 궤적 흔들림(Wobbling)을 펴기 위해 속도/가속도 Loss(`vel_weight=1.0`, `acc_weight=0.1`)를 부활시킴. 훈련 속도 향상을 위해 `cuDNN benchmark`와 혼합 정밀도(`AMP`)를 도입하였으며, 추가로 바닥 충돌점 마스킹 누락 버그(`cumsum <= 1`)를 픽스함.
+    - **결과:** **심각한 궤적 붕괴(Staircase Derivative Explosion) 발생.** `Upsample`의 `mode='nearest'`가 만들어낸 계단식 배열 뼈대에 '속도를 부드럽게 하라'는 미분(Derivative) Loss를 억지로 끼워 맞추려다 보니, 모델이 속도 0(평지)과 무한대(계단 턱) 사이에서 요동치며 학습이 완전히 파탄 남.
+    ![시도 12 궤적 붕괴(Staircase Explosion)](/root/myresearch/attempt12_explosion.png)
+
 ---
 
 ## 📁 디렉토리 구조 (최신화 완료)

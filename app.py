@@ -58,7 +58,7 @@ class CNNDecoder(nn.Module):
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 model_random = CNNDecoder().to(device)
-model_path = os.path.join(DB_DIR, "mlp_standard_random_attempt11_cnn_upsample.pth")
+model_path = os.path.join(DB_DIR, "mlp_standard_random_attempt12_cnn_amp.pth")
 if os.path.exists(model_path):
     try:
         model_random.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
@@ -66,7 +66,7 @@ if os.path.exists(model_path):
         print(f"Warning: Skipping weight load due to mismatch: {e}")
 model_random.eval()
 
-norm_path = os.path.join(DB_DIR, "mlp_norm_standard_random_attempt11_cnn_upsample.npy")
+norm_path = os.path.join(DB_DIR, "mlp_norm_standard_random_attempt12_cnn_amp.npy")
 if os.path.exists(norm_path):
     norm_random = np.load(norm_path)
 else:
