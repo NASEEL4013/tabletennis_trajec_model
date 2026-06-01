@@ -180,6 +180,18 @@ speed = np.random.uniform(1.0, 80.0)
     - **결과:** **심각한 궤적 붕괴(Staircase Derivative Explosion) 발생.** `Upsample`의 `mode='nearest'`가 만들어낸 계단식 배열 뼈대에 '속도를 부드럽게 하라'는 미분(Derivative) Loss를 억지로 끼워 맞추려다 보니, 모델이 속도 0(평지)과 무한대(계단 턱) 사이에서 요동치며 학습이 완전히 파탄 남.
     ![시도 12 궤적 붕괴(Staircase Explosion)](/root/myresearch/attempt12_explosion.png)
 
+13. **시도 13 (Nearest + Kernel Size 7 최적화 및 CNN의 한계 확인):**
+    - **날짜:** 2026-05-31
+    - **내용:** 시도 12의 계단 폭발을 막기 위해 1D Generative CNN의 정석 기법인 `Upsample(nearest)` + `Conv1d(kernel_size=7)` 조합을 적용함. (필터 크기를 늘려 계단을 부드럽게 대패질하도록 유도)
+    - **결과:** **CNN 아키텍처의 근본적 한계(Global Position Drift) 확인.** 예측 궤적을 확인한 결과, V자 바운드의 '형태(국소적 패턴)' 자체는 기가 막히게 형성되었으나 모델이 전체 시간 흐름 속에서의 절대적인 '위치'를 파악하지 못해(장님 코끼리 만지기) 궤적이 정답에서 약 11cm(MAE 0.11)가량 위아래로 심각하게 벗어나며 표류하는 지그재그 현상이 발생함.
+    ![시도 12 궤적 붕괴(Staircase Explosion)](/root/myresearch/attempt13_wiggle.png)
+
+14. **시도 14 (Time-Conditioned MLP + Fourier Positional Encoding):**
+    - **날짜:** 2026-06-01
+    - **내용:** CNN 구조 전면 폐기. NeRF 등 물리 AI(PINN)의 표준인 **암묵적 표현(Implicit Representation)** 아키텍처 도입. 입력에 시간 $t$를 분리하고 **푸리에 위치 인코딩(Fourier Positional Encoding, `num_freqs=10`)**을 적용하여 고주파수(바운드) 자극을 주입함.
+    - **결과:** **스무딩 및 위치 상실 대폭 완화, 그러나 바닥 잔상(Gibbs/Ringing) 발생.** 이전 CNN의 치명적 단점이던 11cm 표류(Drift) 현상이 사라지고 오차가 0.015(1.5cm)까지 안정화됨. 하지만 `ReLU` 활성화 함수의 한계(256 넓이)로 인해 0.002 목표에는 도달하지 못하고 정체기(Plateau)에 빠짐. 특이사항으로 바닥 충돌 이후 시뮬레이터가 정지하여 '상수'가 된 패딩 구간을 부드러운 아날로그 함수가 완벽한 직선으로 외우지 못하면서, 메인 궤적 아래쪽에 분리된 직선 형태의 잔상을 렌더링하는 기괴한 현상이 목격됨.
+    ![시도 14 바닥 잔상 및 0.015 정체기](/root/myresearch/attempt14_fourier.png)
+
 ---
 
 ## 📁 디렉토리 구조 (최신화 완료)

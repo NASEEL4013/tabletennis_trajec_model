@@ -19,46 +19,36 @@ def rotate_2d(vector, angle):
 # ============================================================
 # AI 베이스라인 모델 (MLP) 정의 및 로드
 # ============================================================
-class CNNDecoder(nn.Module):
-    def __init__(self):
+class TimeConditionedMLP(nn.Module):
+    def __init__(self, num_freqs=10):
         super().__init__()
-        self.fc = nn.Sequential(
-            nn.Linear(8, 256 * 10),
-            nn.ReLU()
-        )
-        self.up1 = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode='nearest'),
-            nn.Conv1d(256, 128, kernel_size=3, padding=1),
-            nn.BatchNorm1d(128),
-            nn.ReLU()
-        )
-        self.up2 = nn.Sequential(
-            nn.Upsample(scale_factor=5, mode='nearest'),
-            nn.Conv1d(128, 64, kernel_size=3, padding=1),
-            nn.BatchNorm1d(64),
-            nn.ReLU()
-        )
-        self.up3 = nn.Sequential(
-            nn.Upsample(scale_factor=5, mode='nearest'),
-            nn.Conv1d(64, 32, kernel_size=3, padding=1),
-            nn.BatchNorm1d(32),
-            nn.ReLU()
-        )
-        self.out_conv = nn.Conv1d(32, 3, kernel_size=3, padding=1)
+        self.num_freqs = num_freqs
+        in_dim = 8 + 1 + 2 * num_freqs
         
-    def forward(self, x):
-        x = self.fc(x)
-        x = x.view(-1, 256, 10)
-        x = self.up1(x)
-        x = self.up2(x)
-        x = self.up3(x)
-        x = self.out_conv(x)
-        return x.transpose(1, 2)
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 3)
+        )
+        
+    def forward(self, x, t):
+        freq_bands = 2.0 ** torch.linspace(0, self.num_freqs - 1, self.num_freqs, device=t.device)
+        t_freqs = t * freq_bands * torch.pi
+        
+        t_enc = torch.cat([t, torch.sin(t_freqs), torch.cos(t_freqs)], dim=-1)
+        features = torch.cat([x, t_enc], dim=-1)
+        return self.net(features)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-model_random = CNNDecoder().to(device)
-model_path = os.path.join(DB_DIR, "mlp_standard_random_attempt12_cnn_amp.pth")
+model_random = TimeConditionedMLP().to(device)
+model_path = os.path.join(DB_DIR, "mlp_standard_random_attempt14_time_mlp.pth")
 if os.path.exists(model_path):
     try:
         model_random.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
@@ -66,7 +56,7 @@ if os.path.exists(model_path):
         print(f"Warning: Skipping weight load due to mismatch: {e}")
 model_random.eval()
 
-norm_path = os.path.join(DB_DIR, "mlp_norm_standard_random_attempt12_cnn_amp.npy")
+norm_path = os.path.join(DB_DIR, "mlp_norm_standard_random_attempt14_time_mlp.npy")
 if os.path.exists(norm_path):
     norm_random = np.load(norm_path)
 else:
@@ -236,9 +226,11 @@ def simulate(speed, theta_v, omega_top, omega_side, hit_x, hit_y, hit_z, theta_h
     try:
         if len(mean) == 8: # Only run AI if norm is 8D (meaning model was updated)
             input_norm = (input_arr - mean) / (std + 1e-8)
-            input_tensor = torch.tensor(input_norm, dtype=torch.float32).unsqueeze(0).to(device)
+            input_tensor = torch.tensor(input_norm, dtype=torch.float32).to(device)
             with torch.no_grad():
-                pred_traj = model(input_tensor).cpu().numpy()[0]
+                t = (torch.arange(500, device=device, dtype=torch.float32) * 0.002).unsqueeze(1)
+                x_rep = input_tensor.unsqueeze(0).expand(500, 8)
+                pred_traj = model(x_rep, t).cpu().numpy()
                 
             # --- Post-processing (Floor Cutoff Padding) ---
             hit_floor_indices = np.where(pred_traj[:, 2] <= -0.75)[0]

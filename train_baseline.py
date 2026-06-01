@@ -10,56 +10,37 @@ from tqdm import tqdm
 
 DB_DIR = "/root/myresearch/database"
 EPOCHS = 500
-BATCH_SIZE = 8192
+BATCH_SIZE = 2048
 LR = 0.001
 PATIENCE = 30  # Early Stopping 인내심
 
-class CNNDecoder(nn.Module):
-    def __init__(self):
+class TimeConditionedMLP(nn.Module):
+    def __init__(self, num_freqs=10):
         super().__init__()
-        # 시계열의 씨앗(Seed) 생성: 8 -> 2560 (256채널 x 10프레임)
-        self.fc = nn.Sequential(
-            nn.Linear(8, 256 * 10),
-            nn.ReLU()
+        self.num_freqs = num_freqs
+        in_dim = 8 + 1 + 2 * num_freqs
+        
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 3)
         )
         
-        # 1차 확대: 10프레임 -> 20프레임
-        self.up1 = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode='nearest'),
-            nn.Conv1d(256, 128, kernel_size=3, padding=1),
-            nn.BatchNorm1d(128),
-            nn.ReLU()
-        )
+    def forward(self, x, t):
+        freq_bands = 2.0 ** torch.linspace(0, self.num_freqs - 1, self.num_freqs, device=t.device)
+        t_freqs = t * freq_bands * torch.pi
         
-        # 2차 확대: 20프레임 -> 100프레임
-        self.up2 = nn.Sequential(
-            nn.Upsample(scale_factor=5, mode='nearest'),
-            nn.Conv1d(128, 64, kernel_size=3, padding=1),
-            nn.BatchNorm1d(64),
-            nn.ReLU()
-        )
-        
-        # 3차 확대: 100프레임 -> 500프레임
-        self.up3 = nn.Sequential(
-            nn.Upsample(scale_factor=5, mode='nearest'),
-            nn.Conv1d(64, 32, kernel_size=3, padding=1),
-            nn.BatchNorm1d(32),
-            nn.ReLU()
-        )
-        
-        # 최종 좌표 출력: 32채널 -> 3채널 (X, Y, Z)
-        self.out_conv = nn.Conv1d(32, 3, kernel_size=3, padding=1)
-        
-    def forward(self, x):
-        x = self.fc(x)
-        x = x.view(-1, 256, 10) # (Batch, Channels, Length)
-        x = self.up1(x)
-        x = self.up2(x)
-        x = self.up3(x)
-        x = self.out_conv(x)
-        return x.transpose(1, 2) # (Batch, 500, 3) 꼴로 원복
+        t_enc = torch.cat([t, torch.sin(t_freqs), torch.cos(t_freqs)], dim=-1)
+        features = torch.cat([x, t_enc], dim=-1)
+        return self.net(features)
 
-def train(split_type="random", attempt_name="attempt10_cnn_decoder"):
+def train(split_type="random", attempt_name="attempt14_time_mlp"):
     print(f"==================================================")
     print(f"🚀 Training [REBOOT - {attempt_name.upper()}] Model with [{split_type.upper()}] Split")
     print(f"==================================================")
@@ -94,7 +75,7 @@ def train(split_type="random", attempt_name="attempt10_cnn_decoder"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
-    model = CNNDecoder().to(device)
+    model = TimeConditionedMLP().to(device)
     criterion = nn.L1Loss() # MAE Loss (중앙값 추적) 도입
     
     optimizer = optim.Adam(model.parameters(), lr=LR)
@@ -114,14 +95,12 @@ def train(split_type="random", attempt_name="attempt10_cnn_decoder"):
         is_floor = z_coords <= -0.75
         
         # cumsum을 사용하여 바닥에 처음 닿은 시점(inclusive)까지 마스크에 포함시킴
-        # 기존 cumsum == 0 은 바닥에 닿는 순간 자체를 마스킹해버려 학습을 못하는 심각한 논리적 버그가 있었음.
         mask = (is_floor.cumsum(dim=1) <= 1).float() # (batch_size, 500)
         
         # 2. 오차 계산 (Mask 적용)
         error = torch.abs(preds - batch_y) * mask.unsqueeze(-1)
         
         # 3. 평균 나누기 (활성화된 스텝 개수로만 나눔)
-        # mask.sum()은 전체 배치 내에서 살려진 총 스텝 개수
         total_active_elements = mask.sum() * 3
         
         if total_active_elements > 0:
@@ -129,45 +108,8 @@ def train(split_type="random", attempt_name="attempt10_cnn_decoder"):
         else:
             pos_loss = error.sum() * 0.0 # fallback
             
-        # 4. 물리 미분(Kinematic Derivative) Loss 추가
-        pred_vel = preds[:, 1:, :] - preds[:, :-1, :]
-        true_vel = batch_y[:, 1:, :] - batch_y[:, :-1, :]
-        
-        # t와 t+1 모두 유효한(마스킹 안 된) 스텝만 비교에 포함
-        vel_mask = mask[:, :-1] * mask[:, 1:] # (batch_size, 499)
-        
-        vel_error = torch.abs(pred_vel - true_vel) * vel_mask.unsqueeze(-1)
-        total_active_vels = vel_mask.sum() * 3
-        
-        if total_active_vels > 0:
-            vel_loss = vel_error.sum() / total_active_vels
-        else:
-            vel_loss = vel_error.sum() * 0.0
+        total_loss = pos_loss
             
-        # 가속도 (2차 미분)
-        pred_acc = pred_vel[:, 1:, :] - pred_vel[:, :-1, :]
-        true_acc = true_vel[:, 1:, :] - true_vel[:, :-1, :]
-        
-        acc_mask = vel_mask[:, :-1] * vel_mask[:, 1:] # (batch_size, 498)
-        
-        acc_error = torch.abs(pred_acc - true_acc) * acc_mask.unsqueeze(-1)
-        total_active_accs = acc_mask.sum() * 3
-        
-        if total_active_accs > 0:
-            acc_loss = acc_error.sum() / total_active_accs
-        else:
-            acc_loss = acc_error.sum() * 0.0
-            
-        # ----------------------------------------------------
-        # 시도 12: 물리 브레이크(Kinematic Loss) 복구
-        # CNN 구조(Upsample+Conv1d)로 체커보드는 해결했으나 궤적이 흔들림.
-        # 속도/가속도 페널티를 부활시켜 물리적으로 부드러운 포물선을 그리도록 강제함.
-        # ----------------------------------------------------
-        vel_weight = 1.0
-        acc_weight = 0.1
-        total_loss = pos_loss + vel_weight * vel_loss + acc_weight * acc_loss
-            
-        # 반환값: 역전파용 total_loss, 그리고 실제 MAE 로깅용 위치 오차합(error.sum())
         return total_loss, error.sum(), total_active_elements
 
     # 5. 학습 루프
@@ -182,7 +124,11 @@ def train(split_type="random", attempt_name="attempt10_cnn_decoder"):
             
             optimizer.zero_grad()
             with torch.cuda.amp.autocast():
-                preds = model(batch_X)
+                B = batch_X.shape[0]
+                t = (torch.arange(500, device=device, dtype=torch.float32) * 0.002).unsqueeze(-1)
+                x_expanded = batch_X.unsqueeze(1).expand(B, 500, 8).reshape(B * 500, 8)
+                t_expanded = t.unsqueeze(0).expand(B, 500, 1).reshape(B * 500, 1)
+                preds = model(x_expanded, t_expanded).view(B, 500, 3)
                 loss, batch_error_sum, batch_active_count = compute_masked_loss(preds, batch_y)
             
             scaler.scale(loss).backward()
@@ -207,7 +153,11 @@ def train(split_type="random", attempt_name="attempt10_cnn_decoder"):
         with torch.no_grad():
             for batch_X, batch_y in test_pbar:
                 batch_X, batch_y = batch_X.to(device), batch_y.to(device)
-                preds = model(batch_X)
+                B = batch_X.shape[0]
+                t = (torch.arange(500, device=device, dtype=torch.float32) * 0.002).unsqueeze(-1)
+                x_expanded = batch_X.unsqueeze(1).expand(B, 500, 8).reshape(B * 500, 8)
+                t_expanded = t.unsqueeze(0).expand(B, 500, 1).reshape(B * 500, 1)
+                preds = model(x_expanded, t_expanded).view(B, 500, 3)
                 
                 loss, batch_error_sum, batch_active_count = compute_masked_loss(preds, batch_y)
                 
@@ -238,4 +188,4 @@ def train(split_type="random", attempt_name="attempt10_cnn_decoder"):
     print(f"💾 Model saved to: {model_save_path}\n")
 
 if __name__ == "__main__":
-    train(split_type="random", attempt_name="attempt12_cnn_amp")
+    train(split_type="random", attempt_name="attempt14_time_mlp")
