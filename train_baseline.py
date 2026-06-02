@@ -10,9 +10,20 @@ from tqdm import tqdm
 
 DB_DIR = "/root/myresearch/database"
 EPOCHS = 500
-BATCH_SIZE = 2048
+BATCH_SIZE = 512
 LR = 0.001
 PATIENCE = 30  # Early Stopping 인내심
+
+class ResBlock(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.fc1 = nn.Linear(dim, dim)
+        self.fc2 = nn.Linear(dim, dim)
+        
+    def forward(self, x):
+        h = F.relu(self.fc1(x))
+        h = self.fc2(h)
+        return F.relu(x + h)
 
 class TimeConditionedMLP(nn.Module):
     def __init__(self, num_freqs=10):
@@ -20,17 +31,13 @@ class TimeConditionedMLP(nn.Module):
         self.num_freqs = num_freqs
         in_dim = 8 + 1 + 2 * num_freqs
         
-        self.net = nn.Sequential(
-            nn.Linear(in_dim, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 3)
+        self.fc_in = nn.Sequential(
+            nn.Linear(in_dim, 512),
+            nn.ReLU()
         )
+        
+        self.blocks = nn.ModuleList([ResBlock(512) for _ in range(3)])
+        self.fc_out = nn.Linear(512, 3)
         
     def forward(self, x, t):
         freq_bands = 2.0 ** torch.linspace(0, self.num_freqs - 1, self.num_freqs, device=t.device)
@@ -38,9 +45,14 @@ class TimeConditionedMLP(nn.Module):
         
         t_enc = torch.cat([t, torch.sin(t_freqs), torch.cos(t_freqs)], dim=-1)
         features = torch.cat([x, t_enc], dim=-1)
-        return self.net(features)
+        
+        h = self.fc_in(features)
+        for block in self.blocks:
+            h = block(h)
+            
+        return self.fc_out(h)
 
-def train(split_type="random", attempt_name="attempt14_time_mlp"):
+def train(split_type="random", attempt_name="attempt15_scaled_mlp"):
     print(f"==================================================")
     print(f"🚀 Training [REBOOT - {attempt_name.upper()}] Model with [{split_type.upper()}] Split")
     print(f"==================================================")
@@ -188,4 +200,4 @@ def train(split_type="random", attempt_name="attempt14_time_mlp"):
     print(f"💾 Model saved to: {model_save_path}\n")
 
 if __name__ == "__main__":
-    train(split_type="random", attempt_name="attempt14_time_mlp")
+    train(split_type="random", attempt_name="attempt15_scaled_mlp")

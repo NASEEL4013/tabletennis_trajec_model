@@ -6,6 +6,7 @@ import tracemalloc
 import plotly.graph_objects as go
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from scipy.integrate import solve_ivp
 
 DB_DIR    = "/root/myresearch/database"
@@ -19,23 +20,30 @@ def rotate_2d(vector, angle):
 # ============================================================
 # AI 베이스라인 모델 (MLP) 정의 및 로드
 # ============================================================
+class ResBlock(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.fc1 = nn.Linear(dim, dim)
+        self.fc2 = nn.Linear(dim, dim)
+        
+    def forward(self, x):
+        h = F.relu(self.fc1(x))
+        h = self.fc2(h)
+        return F.relu(x + h)
+
 class TimeConditionedMLP(nn.Module):
     def __init__(self, num_freqs=10):
         super().__init__()
         self.num_freqs = num_freqs
         in_dim = 8 + 1 + 2 * num_freqs
         
-        self.net = nn.Sequential(
-            nn.Linear(in_dim, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 3)
+        self.fc_in = nn.Sequential(
+            nn.Linear(in_dim, 512),
+            nn.ReLU()
         )
+        
+        self.blocks = nn.ModuleList([ResBlock(512) for _ in range(3)])
+        self.fc_out = nn.Linear(512, 3)
         
     def forward(self, x, t):
         freq_bands = 2.0 ** torch.linspace(0, self.num_freqs - 1, self.num_freqs, device=t.device)
@@ -43,12 +51,17 @@ class TimeConditionedMLP(nn.Module):
         
         t_enc = torch.cat([t, torch.sin(t_freqs), torch.cos(t_freqs)], dim=-1)
         features = torch.cat([x, t_enc], dim=-1)
-        return self.net(features)
+        
+        h = self.fc_in(features)
+        for block in self.blocks:
+            h = block(h)
+            
+        return self.fc_out(h)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 model_random = TimeConditionedMLP().to(device)
-model_path = os.path.join(DB_DIR, "mlp_standard_random_attempt14_time_mlp.pth")
+model_path = os.path.join(DB_DIR, "mlp_standard_random_attempt15_scaled_mlp.pth")
 if os.path.exists(model_path):
     try:
         model_random.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
@@ -56,7 +69,7 @@ if os.path.exists(model_path):
         print(f"Warning: Skipping weight load due to mismatch: {e}")
 model_random.eval()
 
-norm_path = os.path.join(DB_DIR, "mlp_norm_standard_random_attempt14_time_mlp.npy")
+norm_path = os.path.join(DB_DIR, "mlp_norm_standard_random_attempt15_scaled_mlp.npy")
 if os.path.exists(norm_path):
     norm_random = np.load(norm_path)
 else:
