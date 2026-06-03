@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 DB_DIR = "/root/myresearch/database"
 EPOCHS = 500
-BATCH_SIZE = 512
+BATCH_SIZE = 1024
 LR = 0.001
 PATIENCE = 30  # Early Stopping 인내심
 
@@ -21,9 +21,9 @@ class ResBlock(nn.Module):
         self.fc2 = nn.Linear(dim, dim)
         
     def forward(self, x):
-        h = F.relu(self.fc1(x))
+        h = F.silu(self.fc1(x))
         h = self.fc2(h)
-        return F.relu(x + h)
+        return F.silu(x + h)
 
 class TimeConditionedMLP(nn.Module):
     def __init__(self, num_freqs=10):
@@ -32,12 +32,12 @@ class TimeConditionedMLP(nn.Module):
         in_dim = 8 + 1 + 2 * num_freqs
         
         self.fc_in = nn.Sequential(
-            nn.Linear(in_dim, 512),
-            nn.ReLU()
+            nn.Linear(in_dim, 256),
+            nn.SiLU()
         )
         
-        self.blocks = nn.ModuleList([ResBlock(512) for _ in range(3)])
-        self.fc_out = nn.Linear(512, 3)
+        self.blocks = nn.ModuleList([ResBlock(256) for _ in range(3)])
+        self.fc_out = nn.Linear(256, 3)
         
     def forward(self, x, t):
         freq_bands = 2.0 ** torch.linspace(0, self.num_freqs - 1, self.num_freqs, device=t.device)
@@ -52,7 +52,7 @@ class TimeConditionedMLP(nn.Module):
             
         return self.fc_out(h)
 
-def train(split_type="random", attempt_name="attempt15_scaled_mlp"):
+def train(split_type="random", attempt_name="attempt16_scaled_mlp"):
     print(f"==================================================")
     print(f"🚀 Training [REBOOT - {attempt_name.upper()}] Model with [{split_type.upper()}] Split")
     print(f"==================================================")
@@ -104,10 +104,13 @@ def train(split_type="random", attempt_name="attempt15_scaled_mlp"):
         # 1. 바닥 충돌 패딩 마스킹 (Z <= -0.75)
         # batch_y shape: (batch_size, 500, 3)
         z_coords = batch_y[:, :, 2]
-        is_floor = z_coords <= -0.75
+        is_floor = (z_coords <= -0.75).float()
         
-        # cumsum을 사용하여 바닥에 처음 닿은 시점(inclusive)까지 마스크에 포함시킴
-        mask = (is_floor.cumsum(dim=1) <= 1).float() # (batch_size, 500)
+        # 바닥에 한 번이라도 닿으면 이후 영원히 1이 유지되도록 함
+        has_hit = (is_floor.cumsum(dim=1) > 0).float()
+        # 한 칸 오른쪽으로 밀어서 바닥에 닿는 첫 프레임까지는 마스크가 1이 되도록 허용
+        has_hit_shifted = torch.cat([torch.zeros_like(has_hit[:, :1]), has_hit[:, :-1]], dim=1)
+        mask = 1.0 - has_hit_shifted # (batch_size, 500)
         
         # 2. 오차 계산 (Mask 적용)
         error = torch.abs(preds - batch_y) * mask.unsqueeze(-1)
@@ -200,4 +203,4 @@ def train(split_type="random", attempt_name="attempt15_scaled_mlp"):
     print(f"💾 Model saved to: {model_save_path}\n")
 
 if __name__ == "__main__":
-    train(split_type="random", attempt_name="attempt15_scaled_mlp")
+    train(split_type="random", attempt_name="attempt16_scaled_mlp")

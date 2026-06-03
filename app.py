@@ -27,9 +27,9 @@ class ResBlock(nn.Module):
         self.fc2 = nn.Linear(dim, dim)
         
     def forward(self, x):
-        h = F.relu(self.fc1(x))
+        h = F.silu(self.fc1(x))
         h = self.fc2(h)
-        return F.relu(x + h)
+        return F.silu(x + h)
 
 class TimeConditionedMLP(nn.Module):
     def __init__(self, num_freqs=10):
@@ -38,12 +38,12 @@ class TimeConditionedMLP(nn.Module):
         in_dim = 8 + 1 + 2 * num_freqs
         
         self.fc_in = nn.Sequential(
-            nn.Linear(in_dim, 512),
-            nn.ReLU()
+            nn.Linear(in_dim, 256),
+            nn.SiLU()
         )
         
-        self.blocks = nn.ModuleList([ResBlock(512) for _ in range(3)])
-        self.fc_out = nn.Linear(512, 3)
+        self.blocks = nn.ModuleList([ResBlock(256) for _ in range(3)])
+        self.fc_out = nn.Linear(256, 3)
         
     def forward(self, x, t):
         freq_bands = 2.0 ** torch.linspace(0, self.num_freqs - 1, self.num_freqs, device=t.device)
@@ -58,10 +58,10 @@ class TimeConditionedMLP(nn.Module):
             
         return self.fc_out(h)
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu") # 공정한 속도 벤치마크를 위해 CPU로 강제 고정
 
 model_random = TimeConditionedMLP().to(device)
-model_path = os.path.join(DB_DIR, "mlp_standard_random_attempt15_scaled_mlp.pth")
+model_path = os.path.join(DB_DIR, "mlp_standard_random_attempt16_scaled_mlp.pth")
 if os.path.exists(model_path):
     try:
         model_random.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
@@ -69,7 +69,7 @@ if os.path.exists(model_path):
         print(f"Warning: Skipping weight load due to mismatch: {e}")
 model_random.eval()
 
-norm_path = os.path.join(DB_DIR, "mlp_norm_standard_random_attempt15_scaled_mlp.npy")
+norm_path = os.path.join(DB_DIR, "mlp_norm_standard_random_attempt16_scaled_mlp.npy")
 if os.path.exists(norm_path):
     norm_random = np.load(norm_path)
 else:
@@ -221,6 +221,13 @@ def simulate(speed, theta_v, omega_top, omega_side, hit_x, hit_y, hit_z, theta_h
     t0 = time.perf_counter()
     
     trad_traj = traditional_physics_solver(speed, theta_v, omega_top, omega_side, hit_x, hit_y, hit_z, theta_h, steps=500, dt=0.002)
+    
+    # --- Ground Truth Post-processing (Floor Cutoff Padding) ---
+    hit_floor_gt = np.where(trad_traj[:, 2] <= -0.75)[0]
+    if len(hit_floor_gt) > 0:
+        first_hit_gt = hit_floor_gt[0]
+        trad_traj[first_hit_gt:] = trad_traj[first_hit_gt]
+        
     x_t, y_t, z_t = trad_traj[:, 0], trad_traj[:, 1], trad_traj[:, 2]
     
     trad_ms = (time.perf_counter() - t0) * 1000
