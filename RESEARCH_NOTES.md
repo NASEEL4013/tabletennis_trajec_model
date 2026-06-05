@@ -203,6 +203,12 @@ speed = np.random.uniform(1.0, 80.0)
     - **내용:** 시도 15의 마스킹 버그(`cumsum <= 1`로 인한 바운스 이후 궤적 차단 실패)를 `cummax` 기반 철벽 마스킹 로직으로 완벽 해결. 추가로 활성화 함수를 `ReLU`에서 `SiLU`로 교체하여 죽은 뉴런(Dying ReLU) 방지 및 부드러운 보간 극대화. 메모리 절약을 위해 폭을 256으로 다이어트하고 배치 사이즈를 1024로 튜닝.
     - **결과:** **대성공 (Test MAE 0.0067 / Train MAE 0.0032 달성)!** 바운스 이후 덜덜거리는 쓰레기 데이터를 완벽 차단(Masking)한 덕분에 0.01의 한계를 돌파하고 약 3~6mm의 초정밀 오차율을 달성함. 시각화 결과 탁구대 반사 및 바닥 충돌(Z=-0.76)이 물리 엔진과 99% 동일하게 렌더링됨. 딥러닝 특성(연속 함수)상 바운드 순간의 뾰족한 V자가 미세하게 둥글려지는 1%의 스무딩 현상은 남았으나 시뮬레이션용으로 완벽히 합격점.
    ![시도 16 안정권 돌입](/root/myresearch/attempt16_silu.png)
+
+17. **시도 17 (가우시안 정규 분포 기반 데이터셋 밀도 최적화):**
+    - **날짜:** 2026-06-04
+    - **내용:** 시도 16의 성공 이후 데이터 품질 자체를 개선함. `generate_dataset.py`의 파라미터 무작위 샘플링 방식을 `np.random.uniform`(균등 분포)에서 **`np.random.normal`(정규 분포)**로 전면 교체함(예외로 speed만 로그정규분포 채용). 
+    - **목적:** 균등 분포의 한계(정상적인 탁구 랠리가 극소수고, 허공이나 바닥을 향하는 쓰레기 궤적이 대다수를 차지하는 현상)를 극복하기 위함. 각 8D 파라미터의 평균(Mean)을 가장 일반적인 랠리 위치/속도에 맞추고, 표준편차(Scale)를 세밀하게 조절하여 **"정상 랠리 70% + 기상천외한 이상치(Edge case) 30%"**의 황금 비율을 갖춘 새로운 데이터셋(`dataset_gaussian_mixed.npz`) 300만 개를 생성하여 모델 크기(256) 낭비를 막고 서브d 밀리미터 단위 정밀도를 노림.
+    - **결과:** **(현재 학습 진행 중 - attempt17_gaussian_mixed)**
 ---
 
 ## 📁 디렉토리 구조 (최신화 완료)
@@ -214,7 +220,10 @@ speed = np.random.uniform(1.0, 80.0)
 ├── train_baseline.py         # AI(Standard MLP) 딥러닝 모델 훈련 스크립트
 ├── RESEARCH_NOTES.md         # 이 연구 노트
 └── database/
-    ├── dataset_random.npz    # 생성된 300만개 통합 정답지 파일
+    ├── dataset_random.npz                 # 기존 균등 분포 정답지
+    ├── dataset_gaussian_mixed.npz         # [New] 정규 분포 최적화 정답지 (시도 17)
     ├── mlp_norm_standard_random_attempt16_scaled_mlp.npy
-    └── mlp_standard_random_attempt16_scaled_mlp.pth
+    ├── mlp_standard_random_attempt16_scaled_mlp.pth
+    ├── mlp_norm_standard_gaussian_mixed_attempt17_gaussian_mixed.npy (생성 중)
+    └── mlp_standard_gaussian_mixed_attempt17_gaussian_mixed.pth (생성 중)
 ```

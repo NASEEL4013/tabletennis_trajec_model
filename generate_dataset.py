@@ -20,15 +20,15 @@ def generate_samples(num_samples):
             elapsed = time.time() - start_time
             print(f"Progress: {i}/{num_samples} (Elapsed: {elapsed:.2f}s)")
             
-        # 파라미터 무작위 샘플링 (프로 레벨 강스매시 및 하이 스핀 커버)
-        speed = np.random.uniform(1.0, 80.0)
-        theta_v = np.random.uniform(-50.0, 50.0)
-        omega_top = np.random.uniform(-200.0, 200.0)
-        omega_side = np.random.uniform(-200.0, 200.0)
-        hit_x = np.random.uniform(-3.0, 3.0)
-        hit_y = np.random.uniform(-4.0, 0.0)
-        hit_z = np.random.uniform(-0.76, 1.5)
-        theta_h = np.random.uniform(-65.0, 65.0)
+        # 파라미터 무작위 샘플링 (정규 분포: 정상 범위 70% / 이상치 30% 비율로 정밀 튜닝)
+        speed = np.clip(np.random.lognormal(mean=1.8, sigma=0.8), 1.0, 80.0)
+        theta_v = np.clip(np.random.normal(15.0, 15.0), -50.0, 50.0)
+        omega_top = np.clip(np.random.normal(50.0, 50.0), -200.0, 200.0)
+        omega_side = np.clip(np.random.normal(0.0, 50.0), -200.0, 200.0)
+        hit_x = np.clip(np.random.normal(0.0, 0.75), -3.0, 3.0)
+        hit_y = np.clip(np.random.normal(-1.5, 0.5), -4.0, 0.0)
+        hit_z = np.clip(np.random.normal(0.3, 0.3), -0.76, 1.5)
+        theta_h = np.clip(np.random.normal(0.0, 20.0), -65.0, 65.0)
         
         inputs[i] = np.round([speed, theta_v, omega_top, omega_side, hit_x, hit_y, hit_z, theta_h], 3)
         
@@ -51,7 +51,7 @@ if __name__ == "__main__":
     train_size = int(0.8 * NUM_SAMPLES)
     train_idx, test_idx = indices[:train_size], indices[train_size:]
     
-    np.savez_compressed(os.path.join(DB_DIR, "dataset_random.npz"),
+    np.savez_compressed(os.path.join(DB_DIR, "dataset_gaussian_mixed.npz"),
                         train_inputs=inputs[train_idx], train_outputs=outputs[train_idx],
                         test_inputs=inputs[test_idx], test_outputs=outputs[test_idx])
     

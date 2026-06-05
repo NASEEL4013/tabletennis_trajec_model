@@ -61,7 +61,7 @@ class TimeConditionedMLP(nn.Module):
 device = torch.device("cpu") # 공정한 속도 벤치마크를 위해 CPU로 강제 고정
 
 model_random = TimeConditionedMLP().to(device)
-model_path = os.path.join(DB_DIR, "mlp_standard_random_attempt16_scaled_mlp.pth")
+model_path = os.path.join(DB_DIR, "mlp_standard_gaussian_mixed_attempt17_gaussian_mixed.pth")
 if os.path.exists(model_path):
     try:
         model_random.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
@@ -69,7 +69,7 @@ if os.path.exists(model_path):
         print(f"Warning: Skipping weight load due to mismatch: {e}")
 model_random.eval()
 
-norm_path = os.path.join(DB_DIR, "mlp_norm_standard_random_attempt16_scaled_mlp.npy")
+norm_path = os.path.join(DB_DIR, "mlp_norm_standard_gaussian_mixed_attempt17_gaussian_mixed.npy")
 if os.path.exists(norm_path):
     norm_random = np.load(norm_path)
 else:
@@ -194,7 +194,7 @@ def traditional_physics_solver(speed, theta_v_deg, omega_top, omega_side, hit_x,
 # 공통 유틸
 # ============================================================
 def make_table_and_net():
-    floor = go.Mesh3d(x=[-2.5, 2.5, 2.5, -2.5], y=[-3.5, -3.5, 3.5, 3.5], z=[-0.76]*4, color='lightgray', opacity=0.4, name='Floor')
+    floor = go.Mesh3d(x=[-4.0, 4.0, 4.0, -4.0], y=[-6.0, -6.0, 6.0, 6.0], z=[-0.76]*4, color='lightgray', opacity=0.4, name='Floor')
     table = go.Mesh3d(x=[-0.76, 0.76, 0.76, -0.76], y=[-1.37, -1.37, 1.37, 1.37], z=[0]*4, color='green', opacity=0.3, name='Table')
     net = go.Scatter3d(x=[-0.76, 0.76], y=[0, 0], z=[0.15, 0.15], mode='lines', line=dict(color='black', width=3), name='Net')
     return floor, table, net
@@ -206,10 +206,10 @@ def apply_transform(traj_xyz, start_x, start_y, start_z, theta_h_rad):
     return (xy_rot[:, 0] + start_x, xy_rot[:, 1] + start_y, z - z[0] + start_z)
 
 SCENE_LAYOUT = dict(
-    xaxis=dict(range=[-1.5, 1.5], title='X (m)'),
-    yaxis=dict(range=[-2.0, 2.0], title='Y (m)'),
-    zaxis=dict(range=[-1.0, 1.0], title='Z (m)'),
-    aspectmode='manual', aspectratio=dict(x=1, y=1.5, z=0.8)
+    xaxis=dict(range=[-3.0, 3.0], title='X (m)'),
+    yaxis=dict(range=[-4.0, 4.0], title='Y (m)'),
+    zaxis=dict(range=[-0.76, 2.0], title='Z (m)'),
+    aspectmode='manual', aspectratio=dict(x=1, y=1.33, z=0.46)
 )
 
 # ============================================================
@@ -300,38 +300,112 @@ def simulate(speed, theta_v, omega_top, omega_side, hit_x, hit_y, hit_z, theta_h
     return fig_trad, fig_ai, metrics_md
 
 # ============================================================
+# 대량 병렬 렌더링 (Batch Processing)
+# ============================================================
+def simulate_batch(num_samples):
+    num_samples = int(num_samples)
+    tracemalloc.start()
+    t0 = time.perf_counter()
+    
+    speed = np.clip(np.random.lognormal(mean=1.8, sigma=0.8, size=num_samples), 1.0, 80.0)
+    theta_v = np.clip(np.random.normal(15.0, 15.0, num_samples), -50.0, 50.0)
+    omega_top = np.clip(np.random.normal(50.0, 50.0, num_samples), -200.0, 200.0)
+    omega_side = np.clip(np.random.normal(0.0, 50.0, num_samples), -200.0, 200.0)
+    hit_x = np.clip(np.random.normal(0.0, 0.75, num_samples), -3.0, 3.0)
+    hit_y = np.clip(np.random.normal(-1.5, 0.5, num_samples), -4.0, 0.0)
+    hit_z = np.clip(np.random.normal(0.3, 0.3, num_samples), -0.76, 1.5)
+    theta_h = np.clip(np.random.normal(0.0, 20.0, num_samples), -65.0, 65.0)
+    
+    input_arr = np.stack([speed, theta_v, omega_top, omega_side, hit_x, hit_y, hit_z, theta_h], axis=1).astype(np.float32)
+    
+    mean, std = norm_random[0], norm_random[1]
+    
+    if len(mean) == 8:
+        input_norm = (input_arr - mean) / (std + 1e-8)
+        input_tensor = torch.tensor(input_norm, dtype=torch.float32).to(device)
+        
+        with torch.no_grad():
+            t = (torch.arange(500, device=device, dtype=torch.float32) * 0.002).unsqueeze(1)
+            t_batch = t.unsqueeze(0).expand(num_samples, 500, 1)
+            x_rep = input_tensor.unsqueeze(1).expand(num_samples, 500, 8)
+            pred_traj = model_random(x_rep, t_batch).cpu().numpy()
+            
+        floor, tbl, net = make_table_and_net()
+        fig = go.Figure([floor, tbl, net])
+        
+        import plotly.express as px
+        colors = px.colors.qualitative.Plotly
+        
+        for i in range(num_samples):
+            traj = pred_traj[i]
+            hit_floor_indices = np.where(traj[:, 2] <= -0.75)[0]
+            if len(hit_floor_indices) > 0:
+                first_hit = hit_floor_indices[0]
+                traj = traj[:first_hit+1]
+                
+            c = colors[i % len(colors)]
+            fig.add_trace(go.Scatter3d(x=traj[:, 0], y=traj[:, 1], z=traj[:, 2], 
+                                       mode='lines', line=dict(color=c, width=4), opacity=0.7, 
+                                       showlegend=False))
+            
+        fig.update_layout(scene=SCENE_LAYOUT, title=f"🚀 AI 디코더 {num_samples}개 병렬 렌더링", margin=dict(l=0, r=0, b=0, t=40))
+    else:
+        fig = go.Figure()
+        
+    ai_ms = (time.perf_counter() - t0) * 1000
+    _, peak_mem_m = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    
+    metrics_md = f"### ⚡ 병렬 렌더링 결과\n- **생성 개수**: {num_samples}개\n- **소요 시간**: **<span style='color:blue'>{ai_ms:.4f} ms</span>**\n- **메모리**: {peak_mem_m:,} B\n> 단 하나의 for-loop나 미분방정식 없이 순수 행렬 곱셈만으로 모든 궤적을 동시 계산합니다."
+    
+    return fig, metrics_md
+
+# ============================================================
 # Gradio UI
 # ============================================================
 with gr.Blocks() as app:
     gr.Markdown("# 🏓 생성형 물리 AI 디코더 시뮬레이터 (Generative Decoder)")
 
-    with gr.Row():
-        with gr.Column(scale=1):
-            gr.Markdown("### ⚡ 물리 파라미터 (입력)")
-            sl_speed     = gr.Slider(1.0,  100.0, value=25.0, step=0.1, label="타격 강도 — 초기 속도 (m/s)")
-            sl_theta_v   = gr.Slider(-85,  85,   value=15,  step=1, label="수직 발사각 θ_v (°)")
-            sl_omega_top = gr.Slider(-800, 800,  value=150, step=5, label="탑스핀 ω_top (rad/s)")
-            sl_omega_sid = gr.Slider(-800, 800,  value=0,   step=5, label="사이드스핀 ω_side (rad/s)")
-            sl_hit_z     = gr.Slider(-0.7, 2.0,  value=0.3, step=0.01, label="타격 높이 Z0 (m)")
+    with gr.Tab("1:1 정밀 비교"):
+        with gr.Row():
+            with gr.Column(scale=1):
+                gr.Markdown("### ⚡ 물리 파라미터 (입력)")
+                sl_speed     = gr.Slider(1.0,  80.0, value=6.5, step=0.1, label="타격 강도 — 초기 속도 (m/s)")
+                sl_theta_v   = gr.Slider(-50,  50,   value=15,  step=1, label="수직 발사각 θ_v (°)")
+                sl_omega_top = gr.Slider(-200, 200,  value=50, step=5, label="탑스핀 ω_top (rad/s)")
+                sl_omega_sid = gr.Slider(-200, 200,  value=0,   step=5, label="사이드스핀 ω_side (rad/s)")
+                sl_hit_z     = gr.Slider(-0.76, 1.5,  value=0.3, step=0.01, label="타격 높이 Z0 (m)")
 
-            gr.Markdown("---")
-            gr.Markdown("### 📍 타격 위치 & 방향")
-            sl_hit_x   = gr.Slider(-3.0, 3.0,  value=0.5,  step=0.05, label="타격 위치 X (m)")
-            sl_hit_y   = gr.Slider(-4.0, 0.0,  value=-1.4, step=0.05, label="타격 위치 Y (m)")
-            sl_theta_h = gr.Slider(-80,  80,   value=15,   step=1, label="수평 타격 방향각 θ_h (°)")
+                gr.Markdown("---")
+                gr.Markdown("### 📍 타격 위치 & 방향")
+                sl_hit_x   = gr.Slider(-3.0, 3.0,  value=0.0,  step=0.05, label="타격 위치 X (m)")
+                sl_hit_y   = gr.Slider(-4.0, 0.0,  value=-1.5, step=0.05, label="타격 위치 Y (m)")
+                sl_theta_h = gr.Slider(-65,  65,   value=0,   step=1, label="수평 타격 방향각 θ_h (°)")
 
-            sim_btn = gr.Button("🚀 AI 렌더링 & 벤치마크 실행", variant="primary")
-            metrics_display = gr.Markdown("버튼을 누르면 시뮬레이션 결과가 나타납니다.")
+                sim_btn = gr.Button("🚀 AI 렌더링 & 벤치마크 실행", variant="primary")
+                metrics_display = gr.Markdown("버튼을 누르면 시뮬레이션 결과가 나타납니다.")
 
-        with gr.Column(scale=2):
-            with gr.Row():
-                plot_trad = gr.Plot(label="Ground Truth 궤적")
-                plot_map  = gr.Plot(label="AI Decoder 궤적")
+            with gr.Column(scale=2):
+                with gr.Row():
+                    plot_trad = gr.Plot(label="Ground Truth 궤적")
+                    plot_map  = gr.Plot(label="AI Decoder 궤적")
 
-    inputs  = [sl_speed, sl_theta_v, sl_omega_top, sl_omega_sid, sl_hit_x, sl_hit_y, sl_hit_z, sl_theta_h]
-    outputs = [plot_trad, plot_map, metrics_display]
-    sim_btn.click(fn=simulate, inputs=inputs, outputs=outputs)
-    app.load(fn=simulate,      inputs=inputs, outputs=outputs)
+        inputs  = [sl_speed, sl_theta_v, sl_omega_top, sl_omega_sid, sl_hit_x, sl_hit_y, sl_hit_z, sl_theta_h]
+        outputs = [plot_trad, plot_map, metrics_display]
+        sim_btn.click(fn=simulate, inputs=inputs, outputs=outputs)
+        app.load(fn=simulate,      inputs=inputs, outputs=outputs)
+
+    with gr.Tab("AI 배치 렌더링 (Random)"):
+        gr.Markdown("### 🚀 초고속 병렬 랜덤 궤적 생성")
+        with gr.Row():
+            with gr.Column(scale=1):
+                sl_num_samples = gr.Slider(10, 300, value=30, step=10, label="생성할 궤적 개수 (Batch Size)")
+                batch_btn = gr.Button("🔥 대량 궤적 쏟아내기", variant="primary")
+                batch_metrics = gr.Markdown("버튼을 누르면 렌더링 결과가 나타납니다.")
+            with gr.Column(scale=2):
+                plot_batch = gr.Plot(label="AI Decoder 대량 궤적")
+                
+        batch_btn.click(fn=simulate_batch, inputs=[sl_num_samples], outputs=[plot_batch, batch_metrics])
 
 if __name__ == "__main__":
     app.launch(server_name="0.0.0.0", server_port=7860)

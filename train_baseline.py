@@ -60,6 +60,8 @@ def train(split_type="random", attempt_name="attempt16_scaled_mlp"):
     # 1. 데이터 로드
     if split_type == "random":
         data = np.load(os.path.join(DB_DIR, "dataset_random.npz"))
+    elif split_type == "gaussian_mixed":
+        data = np.load(os.path.join(DB_DIR, "dataset_gaussian_mixed.npz"))
     else:
         data = np.load(os.path.join(DB_DIR, "dataset_disjoint_speed.npz"))
         
@@ -203,4 +205,4 @@ def train(split_type="random", attempt_name="attempt16_scaled_mlp"):
     print(f"💾 Model saved to: {model_save_path}\n")
 
 if __name__ == "__main__":
-    train(split_type="random", attempt_name="attempt16_scaled_mlp")
+    train(split_type="gaussian_mixed", attempt_name="attempt17_gaussian_mixed")
