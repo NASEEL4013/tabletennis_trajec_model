@@ -61,7 +61,7 @@ class TimeConditionedMLP(nn.Module):
 device = torch.device("cpu") # 공정한 속도 벤치마크를 위해 CPU로 강제 고정
 
 model_random = TimeConditionedMLP().to(device)
-model_path = os.path.join(DB_DIR, "mlp_standard_gaussian_mixed_attempt17_gaussian_mixed.pth")
+model_path = os.path.join(DB_DIR, "mlp_standard_gaussian_mixed_attempt18_truncnorm.pth")
 if os.path.exists(model_path):
     try:
         model_random.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
@@ -69,7 +69,7 @@ if os.path.exists(model_path):
         print(f"Warning: Skipping weight load due to mismatch: {e}")
 model_random.eval()
 
-norm_path = os.path.join(DB_DIR, "mlp_norm_standard_gaussian_mixed_attempt17_gaussian_mixed.npy")
+norm_path = os.path.join(DB_DIR, "mlp_norm_standard_gaussian_mixed_attempt18_truncnorm.npy")
 if os.path.exists(norm_path):
     norm_random = np.load(norm_path)
 else:
@@ -78,7 +78,7 @@ else:
 # ============================================================
 # 기존 물리 엔진
 # ============================================================
-def traditional_physics_solver(speed, theta_v_deg, omega_top, omega_side, hit_x, hit_y, hit_z, theta_h_deg, steps=500, dt=0.002):
+def traditional_physics_solver(speed, theta_v_deg, omega_top, omega_side, hit_x, hit_y, hit_z, theta_h_deg, steps=750, dt=0.002):
     theta_v = np.radians(theta_v_deg)
     theta_h = np.radians(theta_h_deg)
     
@@ -220,7 +220,7 @@ def simulate(speed, theta_v, omega_top, omega_side, hit_x, hit_y, hit_z, theta_h
     tracemalloc.start()
     t0 = time.perf_counter()
     
-    trad_traj = traditional_physics_solver(speed, theta_v, omega_top, omega_side, hit_x, hit_y, hit_z, theta_h, steps=500, dt=0.002)
+    trad_traj = traditional_physics_solver(speed, theta_v, omega_top, omega_side, hit_x, hit_y, hit_z, theta_h, steps=750, dt=0.002)
     
     # --- Ground Truth Post-processing (Floor Cutoff Padding) ---
     hit_floor_gt = np.where(trad_traj[:, 2] <= -0.75)[0]
@@ -248,8 +248,8 @@ def simulate(speed, theta_v, omega_top, omega_side, hit_x, hit_y, hit_z, theta_h
             input_norm = (input_arr - mean) / (std + 1e-8)
             input_tensor = torch.tensor(input_norm, dtype=torch.float32).to(device)
             with torch.no_grad():
-                t = (torch.arange(500, device=device, dtype=torch.float32) * 0.002).unsqueeze(1)
-                x_rep = input_tensor.unsqueeze(0).expand(500, 8)
+                t = (torch.arange(750, device=device, dtype=torch.float32) * 0.002).unsqueeze(1)
+                x_rep = input_tensor.unsqueeze(0).expand(750, 8)
                 pred_traj = model(x_rep, t).cpu().numpy()
                 
             # --- Post-processing (Floor Cutoff Padding) ---
@@ -260,9 +260,9 @@ def simulate(speed, theta_v, omega_top, omega_side, hit_x, hit_y, hit_z, theta_h
                 
             x_m, y_m, z_m = pred_traj[:, 0], pred_traj[:, 1], pred_traj[:, 2]
         else:
-            x_m, y_m, z_m = [0]*500, [0]*500, [0]*500
+            x_m, y_m, z_m = [0]*750, [0]*750, [0]*750
     except:
-        x_m, y_m, z_m = [0]*500, [0]*500, [0]*500
+        x_m, y_m, z_m = [0]*750, [0]*750, [0]*750
         
     ai_ms = (time.perf_counter() - t0) * 1000
     _, peak_mem_m = tracemalloc.get_traced_memory()
@@ -325,9 +325,9 @@ def simulate_batch(num_samples):
         input_tensor = torch.tensor(input_norm, dtype=torch.float32).to(device)
         
         with torch.no_grad():
-            t = (torch.arange(500, device=device, dtype=torch.float32) * 0.002).unsqueeze(1)
-            t_batch = t.unsqueeze(0).expand(num_samples, 500, 1)
-            x_rep = input_tensor.unsqueeze(1).expand(num_samples, 500, 8)
+            t = (torch.arange(750, device=device, dtype=torch.float32) * 0.002).unsqueeze(1)
+            t_batch = t.unsqueeze(0).expand(num_samples, 750, 1)
+            x_rep = input_tensor.unsqueeze(1).expand(num_samples, 750, 8)
             pred_traj = model_random(x_rep, t_batch).cpu().numpy()
             
         floor, tbl, net = make_table_and_net()
@@ -359,6 +359,104 @@ def simulate_batch(num_samples):
     metrics_md = f"### ⚡ 병렬 렌더링 결과\n- **생성 개수**: {num_samples}개\n- **소요 시간**: **<span style='color:blue'>{ai_ms:.4f} ms</span>**\n- **메모리**: {peak_mem_m:,} B\n> 단 하나의 for-loop나 미분방정식 없이 순수 행렬 곱셈만으로 모든 궤적을 동시 계산합니다."
     
     return fig, metrics_md
+
+# ============================================================
+# 대규모 벤치마크 (Benchmark)
+# ============================================================
+def run_benchmark(num_samples):
+    num_samples = int(num_samples)
+    data_path = os.path.join(DB_DIR, "dataset_gaussian_mixed.npz")
+    if not os.path.exists(data_path):
+        return "데이터셋 파일(dataset_gaussian_mixed.npz)을 찾을 수 없습니다."
+        
+    data = np.load(data_path)
+    X_test, y_test = data['test_inputs'], data['test_outputs']
+    
+    if num_samples > len(X_test):
+        num_samples = len(X_test)
+        
+    indices = np.random.choice(len(X_test), num_samples, replace=False)
+    X_sample = X_test[indices]
+    y_sample = y_test[indices]
+    
+    # AI 속도 측정 (Batch)
+    mean, std = norm_random[0], norm_random[1]
+    input_norm = (X_sample - mean) / (std + 1e-8)
+    input_tensor = torch.tensor(input_norm, dtype=torch.float32).to(device)
+    
+    tracemalloc.start()
+    t0_ai = time.perf_counter()
+    with torch.no_grad():
+        t = (torch.arange(750, device=device, dtype=torch.float32) * 0.002).unsqueeze(1)
+        t_batch = t.unsqueeze(0).expand(num_samples, 750, 1)
+        x_rep = input_tensor.unsqueeze(1).expand(num_samples, 750, 8)
+        pred_traj = model_random(x_rep, t_batch).cpu().numpy()
+    ai_time = time.perf_counter() - t0_ai
+    _, peak_mem_ai = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    
+    # 정통 물리 엔진 속도 측정 (일부만 샘플링하여 추정)
+    trad_samples_for_speed = min(num_samples, 100)
+    trad_times = []
+    
+    tracemalloc.start()
+    for i in range(trad_samples_for_speed):
+        speed, theta_v, omega_top, omega_side, hit_x, hit_y, hit_z, theta_h = X_sample[i]
+        t0_trad = time.perf_counter()
+        _ = traditional_physics_solver(speed, theta_v, omega_top, omega_side, hit_x, hit_y, hit_z, theta_h)
+        trad_times.append(time.perf_counter() - t0_trad)
+    _, peak_mem_trad = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    
+    avg_trad_time = np.mean(trad_times) if len(trad_times) > 0 else 0
+    est_total_trad_time = avg_trad_time * num_samples
+    throughput_trad = 1.0 / avg_trad_time if avg_trad_time > 0 else 0
+    
+    avg_ai_time = ai_time / num_samples if num_samples > 0 else 0
+    throughput_ai = num_samples / ai_time if ai_time > 0 else 0
+    
+    # 정확도 및 물리 위반 검사
+    errors = []
+    max_errors = []
+    physics_violations = 0
+    
+    for i in range(num_samples):
+        gt = y_sample[i]
+        pred = pred_traj[i]
+        
+        hit_floor_gt = np.where(gt[:, 2] <= -0.75)[0]
+        first_hit = hit_floor_gt[0] if len(hit_floor_gt) > 0 else 750
+        
+        if first_hit < 750:
+            pred[first_hit:] = pred[first_hit]
+            
+        diff = np.linalg.norm(gt - pred, axis=1)
+        
+        err = diff[:first_hit].mean() if first_hit > 0 else 0
+        mx_err = diff[:first_hit].max() if first_hit > 0 else 0
+        errors.append(err)
+        max_errors.append(mx_err)
+        
+        # 물리 위반: 예측 Z가 -0.78 밑으로 뚫고 내려가거나 기타 등등
+        if np.any(pred[:, 2] < -0.78):
+            physics_violations += 1
+            
+    md_output = f"""
+### 📈 성능 비교 벤치마크 (샘플 수: {num_samples}개)
+
+| 측정 항목 | 🐢 기존 물리 엔진 (GT) | 🚀 AI 디코더 (MLP) | 비교 |
+|---|---|---|---|
+| **총 소요 시간** | {est_total_trad_time:.2f} 초 (예상) | **<span style="color:blue">{ai_time:.4f} 초</span>** | **{est_total_trad_time / ai_time:.1f}배 빠름** |
+| **초당 생성 (Throughput)** | {throughput_trad:.1f} 개/초 | **<span style="color:blue">{throughput_ai:,.1f} 개/초</span>** | **{throughput_ai / throughput_trad:.1f}배 향상** |
+| **1개당 평균 추론 시간** | {avg_trad_time * 1000:.2f} ms | **{avg_ai_time * 1000:.4f} ms** | - |
+| **최대 메모리 사용량** | {peak_mem_trad / 1024 / 1024:.2f} MB | {peak_mem_ai / 1024 / 1024:.2f} MB | - |
+| **평균 오차 (MAE)** | 0.0 mm (기준점) | **{np.mean(errors) * 1000:.2f} mm** | 초정밀 수준 |
+| **최대 오차 (Max Error)** | 0.0 mm | **{np.max(max_errors) * 1000:.2f} mm** | - |
+| **물리 법칙 위반 횟수** | 0 회 | **{physics_violations} 회** | 바닥 투과 등 |
+
+> *참고: 기존 물리 엔진의 총 소요 시간은 첫 {trad_samples_for_speed}개의 평균 소요 시간을 기반으로 산출된 예상치입니다.*
+"""
+    return md_output
 
 # ============================================================
 # Gradio UI
@@ -406,6 +504,18 @@ with gr.Blocks() as app:
                 plot_batch = gr.Plot(label="AI Decoder 대량 궤적")
                 
         batch_btn.click(fn=simulate_batch, inputs=[sl_num_samples], outputs=[plot_batch, batch_metrics])
+
+    with gr.Tab("종합 벤치마크 리포트"):
+        gr.Markdown("### 📊 정통 물리 엔진 vs AI 디코더 대규모 성능 비교")
+        gr.Markdown("테스트 데이터셋(`dataset_gaussian_mixed.npz`)에서 N개의 궤적 샘플을 무작위로 추출하여 정밀도와 속도를 정량적으로 비교합니다.")
+        with gr.Row():
+            with gr.Column(scale=1):
+                bench_samples = gr.Slider(100, 10000, value=1000, step=100, label="벤치마크 샘플 수")
+                bench_btn = gr.Button("벤치마크 실행 (시간이 소요될 수 있습니다)", variant="primary")
+            with gr.Column(scale=2):
+                bench_result_md = gr.Markdown("좌측에서 버튼을 누르면 벤치마크가 시작됩니다...")
+                
+        bench_btn.click(fn=run_benchmark, inputs=[bench_samples], outputs=[bench_result_md])
 
 if __name__ == "__main__":
     app.launch(server_name="0.0.0.0", server_port=7860)

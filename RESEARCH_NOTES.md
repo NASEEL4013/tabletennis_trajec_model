@@ -208,7 +208,13 @@ speed = np.random.uniform(1.0, 80.0)
     - **날짜:** 2026-06-04
     - **내용:** 시도 16의 성공 이후 데이터 품질 자체를 개선함. `generate_dataset.py`의 파라미터 무작위 샘플링 방식을 `np.random.uniform`(균등 분포)에서 **`np.random.normal`(정규 분포)**로 전면 교체함(예외로 speed만 로그정규분포 채용). 
     - **목적:** 균등 분포의 한계(정상적인 탁구 랠리가 극소수고, 허공이나 바닥을 향하는 쓰레기 궤적이 대다수를 차지하는 현상)를 극복하기 위함. 각 8D 파라미터의 평균(Mean)을 가장 일반적인 랠리 위치/속도에 맞추고, 표준편차(Scale)를 세밀하게 조절하여 **"정상 랠리 70% + 기상천외한 이상치(Edge case) 30%"**의 황금 비율을 갖춘 새로운 데이터셋(`dataset_gaussian_mixed.npz`) 300만 개를 생성하여 모델 크기(256) 낭비를 막고 서브d 밀리미터 단위 정밀도를 노림.
-    - **결과:** **(현재 학습 진행 중 - attempt17_gaussian_mixed)**
+    - **결과:** 궤적의 세부 정밀도가 크게 향상함.
+
+18. **시도 18 (100% 기각 샘플링 및 750스텝 연장):**
+    - **날짜:** 2026-06-07
+    - **내용:** 기존 500스텝(1.0초)이었던 궤적을 750스텝(1.5초)으로 1.5배 연장함. `np.clip`으로 인해 이상치가 극단값에 부자연스럽게 뭉치는 현상을 차단하기 위해, 범위를 벗어나면 다시 뽑는 기각 샘플링(Truncated Normal) 방식으로 데이터 생성 로직을 100% 교체. 또한 이상치에 강건한 `SmoothL1Loss`(Huber Loss)를 도입.
+    - **목적:** 더 긴 궤적에 대한 예측 능력을 확보하고, 경계선 데이터 뭉침 현상을 원천 차단하여 양극단의 하드코어 엣지 케이스(이상치)에서도 정밀도를 대폭 끌어올림.
+    - **결과:** (진행 중)
 ---
 
 ## 📁 디렉토리 구조 (최신화 완료)
@@ -224,6 +230,8 @@ speed = np.random.uniform(1.0, 80.0)
     ├── dataset_gaussian_mixed.npz         # [New] 정규 분포 최적화 정답지 (시도 17)
     ├── mlp_norm_standard_random_attempt16_scaled_mlp.npy
     ├── mlp_standard_random_attempt16_scaled_mlp.pth
-    ├── mlp_norm_standard_gaussian_mixed_attempt17_gaussian_mixed.npy (생성 중)
-    └── mlp_standard_gaussian_mixed_attempt17_gaussian_mixed.pth (생성 중)
+    ├── mlp_norm_standard_gaussian_mixed_attempt17_gaussian_mixed.npy
+    ├── mlp_standard_gaussian_mixed_attempt17_gaussian_mixed.pth
+    ├── mlp_norm_standard_gaussian_mixed_attempt18_truncnorm.npy (생성 대기)
+    └── mlp_standard_gaussian_mixed_attempt18_truncnorm.pth (생성 대기)
 ```

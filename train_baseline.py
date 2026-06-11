@@ -90,7 +90,7 @@ def train(split_type="random", attempt_name="attempt16_scaled_mlp"):
     print(f"Using device: {device}")
     
     model = TimeConditionedMLP().to(device)
-    criterion = nn.L1Loss() # MAE Loss (중앙값 추적) 도입
+    criterion = nn.SmoothL1Loss() # Smooth L1 Loss (Huber Loss) 도입
     
     optimizer = optim.Adam(model.parameters(), lr=LR)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10, verbose=True)
@@ -104,7 +104,7 @@ def train(split_type="random", attempt_name="attempt16_scaled_mlp"):
     
     def compute_masked_loss(preds, batch_y):
         # 1. 바닥 충돌 패딩 마스킹 (Z <= -0.75)
-        # batch_y shape: (batch_size, 500, 3)
+        # batch_y shape: (batch_size, 750, 3)
         z_coords = batch_y[:, :, 2]
         is_floor = (z_coords <= -0.75).float()
         
@@ -112,10 +112,10 @@ def train(split_type="random", attempt_name="attempt16_scaled_mlp"):
         has_hit = (is_floor.cumsum(dim=1) > 0).float()
         # 한 칸 오른쪽으로 밀어서 바닥에 닿는 첫 프레임까지는 마스크가 1이 되도록 허용
         has_hit_shifted = torch.cat([torch.zeros_like(has_hit[:, :1]), has_hit[:, :-1]], dim=1)
-        mask = 1.0 - has_hit_shifted # (batch_size, 500)
+        mask = 1.0 - has_hit_shifted # (batch_size, 750)
         
-        # 2. 오차 계산 (Mask 적용)
-        error = torch.abs(preds - batch_y) * mask.unsqueeze(-1)
+        # 2. 오차 계산 (Mask 적용 - Smooth L1 Loss)
+        error = F.smooth_l1_loss(preds, batch_y, reduction='none') * mask.unsqueeze(-1)
         
         # 3. 평균 나누기 (활성화된 스텝 개수로만 나눔)
         total_active_elements = mask.sum() * 3
@@ -142,10 +142,10 @@ def train(split_type="random", attempt_name="attempt16_scaled_mlp"):
             optimizer.zero_grad()
             with torch.cuda.amp.autocast():
                 B = batch_X.shape[0]
-                t = (torch.arange(500, device=device, dtype=torch.float32) * 0.002).unsqueeze(-1)
-                x_expanded = batch_X.unsqueeze(1).expand(B, 500, 8).reshape(B * 500, 8)
-                t_expanded = t.unsqueeze(0).expand(B, 500, 1).reshape(B * 500, 1)
-                preds = model(x_expanded, t_expanded).view(B, 500, 3)
+                t = (torch.arange(750, device=device, dtype=torch.float32) * 0.002).unsqueeze(-1)
+                x_expanded = batch_X.unsqueeze(1).expand(B, 750, 8).reshape(B * 750, 8)
+                t_expanded = t.unsqueeze(0).expand(B, 750, 1).reshape(B * 750, 1)
+                preds = model(x_expanded, t_expanded).view(B, 750, 3)
                 loss, batch_error_sum, batch_active_count = compute_masked_loss(preds, batch_y)
             
             scaler.scale(loss).backward()
@@ -171,10 +171,10 @@ def train(split_type="random", attempt_name="attempt16_scaled_mlp"):
             for batch_X, batch_y in test_pbar:
                 batch_X, batch_y = batch_X.to(device), batch_y.to(device)
                 B = batch_X.shape[0]
-                t = (torch.arange(500, device=device, dtype=torch.float32) * 0.002).unsqueeze(-1)
-                x_expanded = batch_X.unsqueeze(1).expand(B, 500, 8).reshape(B * 500, 8)
-                t_expanded = t.unsqueeze(0).expand(B, 500, 1).reshape(B * 500, 1)
-                preds = model(x_expanded, t_expanded).view(B, 500, 3)
+                t = (torch.arange(750, device=device, dtype=torch.float32) * 0.002).unsqueeze(-1)
+                x_expanded = batch_X.unsqueeze(1).expand(B, 750, 8).reshape(B * 750, 8)
+                t_expanded = t.unsqueeze(0).expand(B, 750, 1).reshape(B * 750, 1)
+                preds = model(x_expanded, t_expanded).view(B, 750, 3)
                 
                 loss, batch_error_sum, batch_active_count = compute_masked_loss(preds, batch_y)
                 
@@ -205,4 +205,4 @@ def train(split_type="random", attempt_name="attempt16_scaled_mlp"):
     print(f"💾 Model saved to: {model_save_path}\n")
 
 if __name__ == "__main__":
-    train(split_type="gaussian_mixed", attempt_name="attempt17_gaussian_mixed")
+    train(split_type="gaussian_mixed", attempt_name="attempt18_truncnorm")
