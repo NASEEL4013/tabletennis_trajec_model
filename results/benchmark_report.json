@@ -1,0 +1,43 @@
+{
+    "benchmark": {
+        "model": "mlp_standard_gaussian_mixed_attempt19_fourier_freq10_pure_l1.pth",
+        "samples": 1000
+    },
+    "performance": {
+        "GT": {
+            "latency_ms": 7.6484546810388565,
+            "throughput": 130.74536513618648,
+            "RAM_MB": 1.08984375
+        },
+        "AI_CPU": {
+            "latency_ms": 1.4201452229171991,
+            "throughput": 498.31675278357335,
+            "RAM_MB": 98.515625
+        },
+        "AI_GPU": {
+            "latency_ms": 0.5003073047846556,
+            "throughput": 8779.750982043577,
+            "VRAM_MB": 1560.8876953125
+        }
+    },
+    "accuracy": {
+        "overall": {
+            "MAE": 4.617952276021242,
+            "RMSE": 6.992068141698837,
+            "Max": 3141.876459121704,
+            "Count": 1000
+        },
+        "speed": {
+            "MAE": 4.7322348691523075,
+            "RMSE": 5.476400256156921,
+            "Max": 152.62697637081146,
+            "Count": 50
+        },
+        "spin": {
+            "MAE": 3.57146211899817,
+            "RMSE": 5.337557289749384,
+            "Max": 172.44014143943787,
+            "Count": 50
+        }
+    }
+}

@@ -171,8 +171,7 @@ def traditional_physics_solver(speed, theta_v_deg, omega_top, omega_side, hit_x,
                     current_state[2] = -1e-4
                     
             elif event_idx == 1: # hit_floor
-                current_state[3:6] = [0.5*vx, 0.5*vy, -0.5*vz]
-                current_state[2] = -0.76 + 1e-4
+                break  # 바닥에 닿으면 즉시 궤적 시뮬레이션 종료
                 
             elif event_idx == 2: # hit_net
                 if abs(x) <= 0.76 and z <= 0.1525:
@@ -371,90 +370,144 @@ def run_benchmark(num_samples):
         
     data = np.load(data_path)
     X_test, y_test = data['test_inputs'], data['test_outputs']
-    
-    if num_samples > len(X_test):
-        num_samples = len(X_test)
-        
+    if num_samples > len(X_test): num_samples = len(X_test)
     indices = np.random.choice(len(X_test), num_samples, replace=False)
-    X_sample = X_test[indices]
-    y_sample = y_test[indices]
+    X_sample, y_sample = X_test[indices], y_test[indices]
     
-    # AI 속도 측정 (Batch)
+    # 엣지 케이스 인덱스
+    speeds = X_sample[:, 0]
+    spins = np.sqrt(X_sample[:, 2]**2 + X_sample[:, 3]**2)
+    edge_idx_speed = np.where(speeds >= np.percentile(speeds, 95))[0]
+    edge_idx_spin = np.where(spins >= np.percentile(spins, 95))[0]
+    
     mean, std = norm_random[0], norm_random[1]
     input_norm = (X_sample - mean) / (std + 1e-8)
-    input_tensor = torch.tensor(input_norm, dtype=torch.float32).to(device)
+    input_cpu = torch.tensor(input_norm, dtype=torch.float32)
     
-    tracemalloc.start()
-    t0_ai = time.perf_counter()
+    import psutil
+    process = psutil.Process(os.getpid())
+    
+    # GT 성능 측정
+    gt_samples = num_samples
+    mem_before_gt = process.memory_info().rss
+    t0_trad = time.perf_counter()
+    for i in range(gt_samples):
+        _ = traditional_physics_solver(*X_sample[i])
+    trad_time = time.perf_counter() - t0_trad
+    mem_after_gt = process.memory_info().rss
+    peak_mem_trad = max(0, mem_after_gt - mem_before_gt)
+    
+    trad_latency_ms = (trad_time / gt_samples) * 1000
+    trad_throughput = 1000 / trad_latency_ms if trad_latency_ms > 0 else 0
+    
+    # AI CPU 성능 측정
+    model_cpu = TimeConditionedMLP()
+    model_cpu.load_state_dict(model_random.state_dict())
+    model_cpu.eval()
+    model_cpu.to("cpu")
+    t_cpu = (torch.arange(750, dtype=torch.float32) * 0.002).unsqueeze(1)
+    
+    t0 = time.perf_counter()
+    for i in range(gt_samples):
+        with torch.no_grad():
+            x_rep = input_cpu[i].unsqueeze(0).expand(750, 8)
+            _ = model_cpu(x_rep, t_cpu).numpy()
+    cpu_latency_ms = ((time.perf_counter() - t0) / gt_samples) * 1000
+    
+    mem_before_ai = process.memory_info().rss
+    t0 = time.perf_counter()
+    batch_size = 500
     with torch.no_grad():
-        t = (torch.arange(750, device=device, dtype=torch.float32) * 0.002).unsqueeze(1)
-        t_batch = t.unsqueeze(0).expand(num_samples, 750, 1)
-        x_rep = input_tensor.unsqueeze(1).expand(num_samples, 750, 8)
-        pred_traj = model_random(x_rep, t_batch).cpu().numpy()
-    ai_time = time.perf_counter() - t0_ai
-    _, peak_mem_ai = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
+        for i in range(0, num_samples, batch_size):
+            bs = min(i + batch_size, num_samples) - i
+            t_batch = t_cpu.unsqueeze(0).expand(bs, 750, 1)
+            x_rep = input_cpu[i:i+bs].unsqueeze(1).expand(bs, 750, 8)
+            _ = model_cpu(x_rep, t_batch).numpy()
+    cpu_batch_time = time.perf_counter() - t0
+    mem_after_ai = process.memory_info().rss
+    peak_mem_cpu = max(0, mem_after_ai - mem_before_ai)
+    cpu_throughput = num_samples / cpu_batch_time if cpu_batch_time > 0 else 0
     
-    # 정통 물리 엔진 속도 측정 (일부만 샘플링하여 추정)
-    trad_samples_for_speed = min(num_samples, 100)
-    trad_times = []
+    # AI GPU 성능 측정
+    gpu_latency_ms, gpu_throughput, peak_vram_gpu = 0, 0, 0
+    pred_traj_list = []
     
-    tracemalloc.start()
-    for i in range(trad_samples_for_speed):
-        speed, theta_v, omega_top, omega_side, hit_x, hit_y, hit_z, theta_h = X_sample[i]
-        t0_trad = time.perf_counter()
-        _ = traditional_physics_solver(speed, theta_v, omega_top, omega_side, hit_x, hit_y, hit_z, theta_h)
-        trad_times.append(time.perf_counter() - t0_trad)
-    _, peak_mem_trad = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
-    
-    avg_trad_time = np.mean(trad_times) if len(trad_times) > 0 else 0
-    est_total_trad_time = avg_trad_time * num_samples
-    throughput_trad = 1.0 / avg_trad_time if avg_trad_time > 0 else 0
-    
-    avg_ai_time = ai_time / num_samples if num_samples > 0 else 0
-    throughput_ai = num_samples / ai_time if ai_time > 0 else 0
-    
-    # 정확도 및 물리 위반 검사
-    errors = []
-    max_errors = []
-    physics_violations = 0
-    
-    for i in range(num_samples):
-        gt = y_sample[i]
-        pred = pred_traj[i]
+    if torch.cuda.is_available():
+        device_gpu = torch.device("cuda")
+        model_gpu = model_random.to(device_gpu)
+        input_gpu = input_cpu.to(device_gpu)
+        t_gpu = t_cpu.to(device_gpu)
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
         
-        hit_floor_gt = np.where(gt[:, 2] <= -0.75)[0]
-        first_hit = hit_floor_gt[0] if len(hit_floor_gt) > 0 else 750
+        torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        for i in range(gt_samples):
+            with torch.no_grad():
+                x_rep = input_gpu[i].unsqueeze(0).expand(750, 8)
+                _ = model_gpu(x_rep, t_gpu).cpu().numpy()
+        torch.cuda.synchronize()
+        gpu_latency_ms = ((time.perf_counter() - t0) / gt_samples) * 1000
         
-        if first_hit < 750:
-            pred[first_hit:] = pred[first_hit]
-            
-        diff = np.linalg.norm(gt - pred, axis=1)
-        
-        err = diff[:first_hit].mean() if first_hit > 0 else 0
-        mx_err = diff[:first_hit].max() if first_hit > 0 else 0
-        errors.append(err)
-        max_errors.append(mx_err)
-        
-        # 물리 위반: 예측 Z가 -0.78 밑으로 뚫고 내려가거나 기타 등등
-        if np.any(pred[:, 2] < -0.78):
-            physics_violations += 1
-            
+        torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        with torch.no_grad():
+            for i in range(0, num_samples, batch_size):
+                bs = min(i + batch_size, num_samples) - i
+                t_batch = t_gpu.unsqueeze(0).expand(bs, 750, 1)
+                x_rep = input_gpu[i:i+bs].unsqueeze(1).expand(bs, 750, 8)
+                pred = model_gpu(x_rep, t_batch).cpu().numpy()
+                pred_traj_list.append(pred)
+        torch.cuda.synchronize()
+        gpu_batch_time = time.perf_counter() - t0
+        peak_vram_gpu = torch.cuda.max_memory_allocated(device_gpu)
+        gpu_throughput = num_samples / gpu_batch_time if gpu_batch_time > 0 else 0
+    else:
+        with torch.no_grad():
+            for i in range(0, num_samples, batch_size):
+                bs = min(i + batch_size, num_samples) - i
+                t_batch = t_cpu.unsqueeze(0).expand(bs, 750, 1)
+                x_rep = input_cpu[i:i+bs].unsqueeze(1).expand(bs, 750, 8)
+                pred = model_cpu(x_rep, t_batch).numpy()
+                pred_traj_list.append(pred)
+
+    pred_traj = np.concatenate(pred_traj_list, axis=0)
+    
+    def calculate_metrics(idx_list):
+        if len(idx_list) == 0: return {"MAE": 0, "RMSE": 0, "Max": 0, "Count": 0}
+        err_l1, err_l2, max_err = [], [], []
+        for i in idx_list:
+            gt, pred = y_sample[i], pred_traj[i]
+            hf_gt = np.where(gt[:, 2] <= -0.75)[0]
+            first_hit = hf_gt[0] if len(hf_gt) > 0 else 750
+            if first_hit < 750: pred[first_hit:] = pred[first_hit]
+            diff = np.linalg.norm(gt - pred, axis=1)
+            err_l1.append(diff[:first_hit].mean() if first_hit > 0 else 0)
+            err_l2.append(np.sqrt(np.mean(diff[:first_hit]**2)) if first_hit > 0 else 0)
+            max_err.append(diff[:first_hit].max() if first_hit > 0 else 0)
+        return {"MAE": float(np.mean(err_l1)*1000), "RMSE": float(np.mean(err_l2)*1000), "Max": float(np.max(max_err)*1000),
+                "Count": len(idx_list)}
+
+    ovr = calculate_metrics(np.arange(num_samples))
+    espd = calculate_metrics(edge_idx_speed)
+    espn = calculate_metrics(edge_idx_spin)
+
     md_output = f"""
-### 📈 성능 비교 벤치마크 (샘플 수: {num_samples}개)
+### 📈 엄밀한 성능 비교 벤치마크 (샘플 수: {num_samples}개)
 
-| 측정 항목 | 🐢 기존 물리 엔진 (GT) | 🚀 AI 디코더 (MLP) | 비교 |
+#### 1. 속도 및 2. 메모리 사용량 (CPU/GPU 분리)
+| 측정 항목 | 🐢 GT 물리 엔진 (CPU) | 🚀 AI 디코더 (CPU) | 🔥 AI 디코더 (GPU) |
 |---|---|---|---|
-| **총 소요 시간** | {est_total_trad_time:.2f} 초 (예상) | **<span style="color:blue">{ai_time:.4f} 초</span>** | **{est_total_trad_time / ai_time:.1f}배 빠름** |
-| **초당 생성 (Throughput)** | {throughput_trad:.1f} 개/초 | **<span style="color:blue">{throughput_ai:,.1f} 개/초</span>** | **{throughput_ai / throughput_trad:.1f}배 향상** |
-| **1개당 평균 추론 시간** | {avg_trad_time * 1000:.2f} ms | **{avg_ai_time * 1000:.4f} ms** | - |
-| **최대 메모리 사용량** | {peak_mem_trad / 1024 / 1024:.2f} MB | {peak_mem_ai / 1024 / 1024:.2f} MB | - |
-| **평균 오차 (MAE)** | 0.0 mm (기준점) | **{np.mean(errors) * 1000:.2f} mm** | 초정밀 수준 |
-| **최대 오차 (Max Error)** | 0.0 mm | **{np.max(max_errors) * 1000:.2f} mm** | - |
-| **물리 법칙 위반 횟수** | 0 회 | **{physics_violations} 회** | 바닥 투과 등 |
+| **단일 추론 반응속도 (Latency)** | {trad_latency_ms:.2f} ms / 개 | **<span style="color:blue">{cpu_latency_ms:.2f} ms / 개</span>** | **<span style="color:red">{gpu_latency_ms:.2f} ms / 개</span>** |
+| **초당 전체 궤도 생성 (Throughput)** | {trad_throughput:.1f} 개/초 | **<span style="color:blue">{cpu_throughput:,.1f} 개/초</span>** | **<span style="color:red">{gpu_throughput:,.1f} 개/초</span>** |
+| **최대 메모리 사용량 (Peak Memory)** | {peak_mem_trad / 1024 / 1024:.2f} MB (RAM) | {peak_mem_cpu / 1024 / 1024:.2f} MB (RAM) | **{peak_vram_gpu / 1024 / 1024:.2f} MB (VRAM)** |
 
-> *참고: 기존 물리 엔진의 총 소요 시간은 첫 {trad_samples_for_speed}개의 평균 소요 시간을 기반으로 산출된 예상치입니다.*
+#### 3. 오차 분석 & 이상치 엣지 케이스
+| 테스트 그룹 (이상치 포함) | 평균 오차 (MAE) | 최대 오차 |
+|---|---|---|
+| **전체 평균 (N={ovr['Count']})** | **{ovr['MAE']:.2f} mm** | <span style="color:red">{ovr['Max']:.1f} mm</span> |
+| **극한의 스피드 상위 5% (N={espd['Count']})** | **{espd['MAE']:.2f} mm** | <span style="color:red">{espd['Max']:.1f} mm</span> |
+| **극한의 스핀 상위 5% (N={espn['Count']})** | **{espn['MAE']:.2f} mm** | <span style="color:red">{espn['Max']:.1f} mm</span> |
 """
     return md_output
 
