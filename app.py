@@ -61,7 +61,7 @@ class TimeConditionedMLP(nn.Module):
 device = torch.device("cpu") # 공정한 속도 벤치마크를 위해 CPU로 강제 고정
 
 model_random = TimeConditionedMLP().to(device)
-model_path = os.path.join(DB_DIR, "mlp_standard_gaussian_mixed_attempt18_truncnorm.pth")
+model_path = os.path.join(DB_DIR, "mlp_standard_gaussian_mixed_attempt19_fourier_freq10_pure_l1.pth")
 if os.path.exists(model_path):
     try:
         model_random.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
@@ -69,7 +69,7 @@ if os.path.exists(model_path):
         print(f"Warning: Skipping weight load due to mismatch: {e}")
 model_random.eval()
 
-norm_path = os.path.join(DB_DIR, "mlp_norm_standard_gaussian_mixed_attempt18_truncnorm.npy")
+norm_path = os.path.join(DB_DIR, "mlp_norm_standard_gaussian_mixed_attempt19_fourier_freq10_pure_l1.npy")
 if os.path.exists(norm_path):
     norm_random = np.load(norm_path)
 else:

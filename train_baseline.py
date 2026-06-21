@@ -90,7 +90,6 @@ def train(split_type="random", attempt_name="attempt16_scaled_mlp"):
     print(f"Using device: {device}")
     
     model = TimeConditionedMLP().to(device)
-    criterion = nn.SmoothL1Loss() # Smooth L1 Loss (Huber Loss) 도입
     
     optimizer = optim.Adam(model.parameters(), lr=LR)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10, verbose=True)
@@ -114,8 +113,8 @@ def train(split_type="random", attempt_name="attempt16_scaled_mlp"):
         has_hit_shifted = torch.cat([torch.zeros_like(has_hit[:, :1]), has_hit[:, :-1]], dim=1)
         mask = 1.0 - has_hit_shifted # (batch_size, 750)
         
-        # 2. 오차 계산 (Mask 적용 - Smooth L1 Loss)
-        error = F.smooth_l1_loss(preds, batch_y, reduction='none') * mask.unsqueeze(-1)
+        # 2. 오차 계산 (순수 L1 Loss 복원 및 가중치 꼼수 폐기)
+        error = F.l1_loss(preds, batch_y, reduction='none') * mask.unsqueeze(-1)
         
         # 3. 평균 나누기 (활성화된 스텝 개수로만 나눔)
         total_active_elements = mask.sum() * 3
@@ -205,4 +204,4 @@ def train(split_type="random", attempt_name="attempt16_scaled_mlp"):
     print(f"💾 Model saved to: {model_save_path}\n")
 
 if __name__ == "__main__":
-    train(split_type="gaussian_mixed", attempt_name="attempt18_truncnorm")
+    train(split_type="gaussian_mixed", attempt_name="attempt19_fourier_freq10_pure_l1")
