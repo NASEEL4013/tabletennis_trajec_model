@@ -4,3 +4,5 @@ __pycache__/
 *.npy
 *.npz
 *.md
+!README.md
+!RESEARCH_NOTES.md
