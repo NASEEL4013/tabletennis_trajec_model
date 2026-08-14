@@ -80,26 +80,26 @@
    - **날짜:** 2026-05-26
    - **내용:** 순수 Expanding MLP (`1024 -> 1500`) + 기본 MSE Loss
    - **결과:** 엄청난 파도타기(심각한 궤도 구불거림, Wavy artifacts) 현상이 발생함.
-   ![시도 1 진짜 궤적: 심각한 파도타기 현상](/root/myresearch/attempt1_protoMLP.png)
+   ![시도 1 진짜 궤적: 심각한 파도타기 현상](results/attempt1_protoMLP.png)
 
 2. **시도 2 (Kinematic Loss 도입):**
    - **날짜:** 2026-05-27
    - **내용:** Expanding MLP (`1024 -> 1500`) + MSE Loss + **Kinematic Loss (L1)**
    - **결과:** 구불거림(파도타기)은 완전히 사라지고 궤적이 엄청나게 부드러워졌으나, **가장 중요한 바운드(탁구대 충돌) 현상 자체가 아예 실종됨!** 궤적이 바닥을 찍지 않고 공중에서 부드럽게 둥둥 떠가는 궤적이 생성됨.
-   ![시도 2 진짜 궤적: 바운드 실종 및 과도한 스무딩](/root/myresearch/attempt2_kinematic.png)
+   ![시도 2 진짜 궤적: 바운드 실종 및 과도한 스무딩](results/attempt2_kinematic.png)
 
 3. **시도 3 (Chamfer Distance 도입):**
    - **날짜:** 2026-05-28
    - **내용:** Expanding MLP (`1024 -> 1500`) + MSE Loss + **Chamfer Distance**
    - **결과:** 형태(V자)만 억지로 맞추려다 보니 **시간(시계열) 개념이 완전히 붕괴됨**. 점들이 궤적을 따라 순서대로 배치되지 않고 바운드 지점 근처에 무질서하게 뭉치면서(Point Cloud 형태로 산산조각 남) **형태도, 애니메이션 속도도 모두 파탄 나는 대실패**를 겪음.
-   ![시도 3 궤적 파탄](/root/myresearch/attempt3_chamfer_fail.png)
+   ![시도 3 궤적 파탄](results/attempt3_chamfer_fail.png)
 
 4. **시도 4 (ResNet 구조 도입 + L1 Loss):**
    - **날짜:** 2026-05-28
    - **내용:** Expanding MLP 뼈대 골목 사이에 **ResBlock(Skip Connection, Pre-Activation)** 삽입 + 순수 **L1 Loss(MAE)** 교체
    - **목적:** 손실 함수 조작으로는 본질적인 불확실성(평균화)을 피할 수 없다는 결론 하에, 뼈대 자체가 깊은 층에서도 날카로운 정보(High-frequency)를 소실 없이 끝까지 전달할 수 있도록 아키텍처를 진화시킴. 추가로 L1 Loss로 중앙값을 강제 추적함.
    - **결과:** **울퉁불퉁한 지렁이 궤적 발생 (Wobbling/Jittering)**. ResNet 덕분에 '날카로운(High-frequency)' 정보를 표현할 근육은 생겼고 L1 Loss 덕분에 둥글게 퉁치려는 현상은 막았으나, 데이터 밀도가 너무 낮아(차원의 저주) 바운드 타이밍을 정확히 확신하지 못함. 결과적으로 이리저리 찍어 맞추려다 바운드 지점 근처에서 심하게 요동치는(출렁거리는) 기괴한 궤적이 만들어짐.
-   ![시도 4 지렁이 궤적](/root/myresearch/attempt4_resnet_fail.png)
+   ![시도 4 지렁이 궤적](results/attempt4_resnet_fail.png)
 
 ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ**데이터 증강 및 파라미터 범위 축소**ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
 이전 파라미터 :
@@ -129,21 +129,21 @@ speed = np.random.uniform(1.0, 80.0)
    - **내용:** 파라미터 범위를 축소하여 300만 개로 밀도를 대폭 높인 데이터셋 적용 + Expanding MLP + ResBlock + L1 Loss (GPU 최적화를 위해 BATCH_SIZE를 4096으로 상향)
    - **목적:** 데이터 밀도가 높아졌을 때 뼈대가 튼튼한 시도 4 모델이 바운드 지점에서의 불확실성(지렁이 궤적)을 얼마나 잡아낼 수 있을지 확인
    - **결과:** Test MAE **0.017 (약 1.7cm)**로 엄청난 정밀도를 기록했으나, 각 점을 독립적으로 예측하는 모델의 한계로 인해 시각화(`app.py`) 결과 여전히 궤적이 **심하게 구불거리는 지렁이(Jittering) 현상이 잔존**함.
-   ![시도 5 지렁이 현상 잔존](/root/myresearch/attempt5_resnet_jitter.png)
+   ![시도 5 지렁이 현상 잔존](results/attempt5_resnet_jitter.png)
 
 6. **시도 6 (Padding Masking 단독 적용):**
    - **날짜:** 2026-05-29
    - **내용:** 바닥(Z<=-0.75)에 닿은 이후 시뮬레이터가 멈춘 좌표를 계속 복사(Padding)하는 함정을 발견. 훈련 코드에서 **바닥 충돌 이후 구간을 오차 계산에서 완전히 배제하는 Padding Masking** 로직을 도입.
    - **목적:** 가만히 멈춰있는 패딩 구간을 맞춰서 오차율을 0.017로 속이던 '착시 현상'을 제거하고, AI의 학습 용량을 오직 공중에 떠 있는 '진짜 비행 궤적'에만 100% 몰빵시키기 위함.
    - **결과:** 엄청난 성과! 마스킹 덕분에 가짜 오차가 걷히고(초기 0.10부터 시작), 157 Epoch 만에 진짜 오차 0.013(1.3cm) 달성. 시각화 결과, **바운드 이전의 비행 궤도가 지렁이 요동침 없이 완벽하게 안정적인 포물선으로 펴짐(궤도 불안정 해결!)**. 하지만 바운드 지점에서 여전히 V자가 아닌 U자로 뭉개지는(Bounce Smoothing) 현상이 남아 있어 바운드 이후 궤도는 무너짐.
-   ![시도 6 스무딩 현상 잔존 및 지렁이 현상 해결](/root/myresearch/attempt6_mask.png)
+   ![시도 6 스무딩 현상 잔존 및 지렁이 현상 해결](results/attempt6_mask.png)
 
 7. **시도 7 (Physics-Informed Cosine Similarity Loss):**
    - **날짜:** 2026-05-29
    - **내용:** 속도 벡터의 진행 방향(각도) 일치 여부를 검사하는 코사인 유사도(Cosine Similarity) 방향 Loss를 투입. (단, 가속도 및 속도의 크기(Magnitude) 제약은 실수로 배제됨)
    - **목적:** 바운드 순간의 '급격한 위쪽(↗) 방향 꺾임'을 뭉개버리면 페널티를 맞도록 설계하여, 날카로운 V자 바운스를 유도함.
    - **결과:** **대실패!** 궤적이 뱀처럼 구불구불해지고, 바운드 이후 중력을 무시한 채 허공을 수평으로 기어가는 참사 발생. ** AI는 위치가 틀리더라도 각도 점수만 잘 받기 위해 스피드를 극단적으로 줄이면서 방향만 맞추는 **얍삽한 꼼수(Local Minima)**를 학습함.
-   ![시도 7 코사인 꼼수 실패](/root/myresearch/attempt7_cosine.png)
+   ![시도 7 코사인 꼼수 실패](results/attempt7_cosine.png)
 
 8. **시도 8 (Physics-Informed Kinematic Derivative Loss):**
    - **날짜:** 2026-05-30
@@ -151,57 +151,57 @@ speed = np.random.uniform(1.0, 80.0)
    - **목적:** 가속도 Loss를 통해 공중에서의 중력과 바운드 순간의 '수직 가속도 스파이크(+4500m/s²)'를 강제로 학습시킴 (Gradient-Weighted Loss).
    - **결과:**  Train MAE 0.008(0.8cm), Test MAE 0.014 달성. 뱀처럼 구불거리던 현상이 완전히 사라지고, 코사인 Loss의 얍삽한 꼼수도 차단됨. 지금까지의 시도중 가장 양호한 결과가 나옴
    total_loss = pos_loss + 1.0 * vel_loss + 1.0 * acc_loss
-   ![시도 8 완벽한 물리 법칙 모방](/root/myresearch/attempt8_kinematic.png)
+   ![시도 8 완벽한 물리 법칙 모방](results/attempt8_kinematic.png)
 
 9. **시도 9 (Strong Kinematic Derivative Loss):**
    - **날짜:** 2026-05-30
    - **내용:** 속도(3.0)와 가속도(5.0)의 페널티 가중치를 극단적으로 높여서 훈련 진행.
    - **목적:** 바운드 시점의 극단적인 가속도 변화를 더 강하게 강제하여 더욱 날카로운 V자 궤적을 만들고자 함.
    - **결과:** **과도한 페널티로 인한 역효과 (Over-smoothing) 발생.** 가속도 오차에 대한 페널티가 너무 거대해지자, 모델은 바운드 순간의 스파이크를 감당하지 못하고, 오차 폭탄을 피하기 위해 바운드 지점을 스무스하게 둥글려버리는 꼼수(U자 궤적 및 허공에 떠다니는 현상)를 다시 학습함. (시도 2와 유사한 스무딩 현상 재발)
-   ![시도 9 가중치 과다로 인한 과도한 스무딩](/root/myresearch/attempt9_strong_kinematic.png)
+   ![시도 9 가중치 과다로 인한 과도한 스무딩](results/attempt9_strong_kinematic.png)
 
 10. **시도 10 (1D CNN Decoder 도입 - 구조적 한계 극복):**
     - **날짜:** 2026-05-30
     - **내용:** MLP 구조가 가지는 연속적 보간(Interpolation) 특성 때문에 바운드 타이밍이 미세하게 이동할 때 궤적이 U자로 뭉개지는 현상(스무딩)이 근본적 원인임을 파악함.
     - **해결책:** 속도/가속도 등 복잡한 Loss를 모두 제거하고 오직 `pos_loss`만 남긴 채, 모델 아키텍처를 `1D CNN Decoder`로 전면 교체. (Checkerboard Artifact 방지를 위해 Overlap 커널 K=9 적용)
     - **결과:** **심각한 고주파 노이즈(지그재그) 발생.** `kernel_size=9`와 `stride=5`의 조합이 겹치는 횟수(Overlap)를 불균등하게 만들어(1번 겹쳤다 2번 겹쳤다 반복) '체커보드 아티팩트'를 정통으로 유발함. 게다가 속도/가속도 Loss를 제거하여 이러한 고주파 노이즈를 억제할 안전장치마저 없었음.
-    ![시도 10 체커보드 아티팩트 발생](/root/myresearch/attempt10_checkerboard.png)
+    ![시도 10 체커보드 아티팩트 발생](results/attempt10_checkerboard.png)
 
 11. **시도 11 (Upsample + Conv1d 및 Loss 절제 연구):**
     - **날짜:** 2026-05-31
     - **내용:** 시도 10의 체커보드 아티팩트를 해결하기 위해 `ConvTranspose1d`를 폐기하고, 최신 표준 디코더 구조인 `nn.Upsample` + `nn.Conv1d` 조합으로 개편함. CNN의 순수 형태 포착 능력을 테스트하기 위해 속도/가속도 Loss는 계속 비활성화(0.0) 상태를 유지함.
     - **결과:** **체커보드 지그재그 노이즈 완전 해결, 그러나 궤적이 흔들림(Wobbling) 발생.** 구조적 개편으로 고주파 노이즈는 완벽히 사라졌으나, 물리적 제약(속도/가속도 페널티)이 없기 때문에 CNN이 점들을 정답 근처에 국소적으로만 찍어낼 뿐 매끄러운 포물선 곡선을 그리지 못하고 벌레가 기어가는 듯한 구불구불한 궤적을 만듦. (Global Smoothness의 부재)
-    ![시도 11 궤적 흔들림(Wobbling)](/root/myresearch/attempt11_wobble.png)
+    ![시도 11 궤적 흔들림(Wobbling)](results/attempt11_wobble.png)
 
 12. **시도 12 (물리 Loss 복구 및 가속 도입 - 실패):**
     - **날짜:** 2026-05-31
     - **내용:** 시도 11의 궤적 흔들림(Wobbling)을 펴기 위해 속도/가속도 Loss(`vel_weight=1.0`, `acc_weight=0.1`)를 부활시킴. 훈련 속도 향상을 위해 `cuDNN benchmark`와 혼합 정밀도(`AMP`)를 도입하였으며, 추가로 바닥 충돌점 마스킹 누락 버그(`cumsum <= 1`)를 픽스함.
     - **결과:** **심각한 궤적 붕괴(Staircase Derivative Explosion) 발생.** `Upsample`의 `mode='nearest'`가 만들어낸 계단식 배열 뼈대에 '속도를 부드럽게 하라'는 미분(Derivative) Loss를 억지로 끼워 맞추려다 보니, 모델이 속도 0(평지)과 무한대(계단 턱) 사이에서 요동치며 학습이 완전히 파탄 남.
-    ![시도 12 궤적 붕괴(Staircase Explosion)](/root/myresearch/attempt12_explosion.png)
+    ![시도 12 궤적 붕괴(Staircase Explosion)](results/attempt12_explosion.png)
 
 13. **시도 13 (Nearest + Kernel Size 7 최적화 및 CNN의 한계 확인):**
     - **날짜:** 2026-05-31
     - **내용:** 시도 12의 계단 폭발을 막기 위해 1D Generative CNN의 정석 기법인 `Upsample(nearest)` + `Conv1d(kernel_size=7)` 조합을 적용함. (필터 크기를 늘려 계단을 부드럽게 대패질하도록 유도)
     - **결과:** **CNN 아키텍처의 근본적 한계(Global Position Drift) 확인.** 예측 궤적을 확인한 결과, V자 바운드의 '형태(국소적 패턴)' 자체는 기가 막히게 형성되었으나 모델이 전체 시간 흐름 속에서의 절대적인 '위치'를 파악하지 못해(장님 코끼리 만지기) 궤적이 정답에서 약 11cm(MAE 0.11)가량 위아래로 심각하게 벗어나며 표류하는 지그재그 현상이 발생함.
-    ![시도 12 궤적 붕괴(Staircase Explosion)](/root/myresearch/attempt13_wiggle.png)
+    ![시도 12 궤적 붕괴(Staircase Explosion)](results/attempt13_wiggle.png)
 
 14. **시도 14 (Time-Conditioned MLP + Fourier Positional Encoding):**
     - **날짜:** 2026-06-01
     - **내용:** CNN 구조 전면 폐기. NeRF 등 물리 AI(PINN)의 표준인 **암묵적 표현(Implicit Representation)** 아키텍처 도입. 입력에 시간 $t$를 분리하고 **푸리에 위치 인코딩(Fourier Positional Encoding, `num_freqs=10`)**을 적용하여 고주파수(바운드) 자극을 주입함.
     - **결과:** **스무딩 및 위치 상실 대폭 완화, 그러나 바닥 잔상(Gibbs/Ringing) 발생.** 이전 CNN의 치명적 단점이던 11cm 표류(Drift) 현상이 사라지고 오차가 0.015(1.5cm)까지 안정화됨. 하지만 `ReLU` 활성화 함수의 한계(256 넓이)로 인해 0.002 목표에는 도달하지 못하고 정체기(Plateau)에 빠짐. 특이사항으로 바닥 충돌 이후 시뮬레이터가 정지하여 '상수'가 된 패딩 구간을 부드러운 아날로그 함수가 완벽한 직선으로 외우지 못하면서, 메인 궤적 아래쪽에 분리된 직선 형태의 잔상을 렌더링하는 기괴한 현상이 목격됨.
-    ![시도 14 바닥 잔상 및 0.015 정체기](/root/myresearch/attempt14_fourier.png)
+    ![시도 14 바닥 잔상 및 0.015 정체기](results/attempt14_fourier.png)
 
 15. **시도 15 (마스킹 버그 및 물리 엔진 모순 발견):**
     - **날짜:** 2026-06-02
     - **내용:** 시도 14의 모델(Time-Conditioned MLP)을 그대로 사용하면서 모델의 크기를 키움.(256 -> 512, 2층 res block -> 3층 res block)
     - **결과:** 전체적으로 v자도 지금까지 시도 중에 가장 잘 나왔고 궤적도 나쁘지는 않지만 loss률이 0.02수준이며 궤적이 살짝 불안정함. 공이 한두개씩 튀는 현상 발생
-   ![시도 15 V자 해결 및 궤도불안정](/root/myresearch/attempt15_deep_res_fourier.png)
+   ![시도 15 V자 해결 및 궤도불안정](results/attempt15_deep_res_fourier.png)
 
 16. **시도 16 (완벽한 마스킹, SiLU, 최적화 모델 스케일링):**
     - **날짜:** 2026-06-03
     - **내용:** 시도 15의 마스킹 버그(`cumsum <= 1`로 인한 바운스 이후 궤적 차단 실패)를 `cummax` 기반 철벽 마스킹 로직으로 완벽 해결. 추가로 활성화 함수를 `ReLU`에서 `SiLU`로 교체하여 죽은 뉴런(Dying ReLU) 방지 및 부드러운 보간 극대화. 메모리 절약을 위해 폭을 256으로 다이어트하고 배치 사이즈를 1024로 튜닝.
     - **결과:** **대성공 (Test MAE 0.0067 / Train MAE 0.0032 달성)!** 바운스 이후 덜덜거리는 쓰레기 데이터를 완벽 차단(Masking)한 덕분에 0.01의 한계를 돌파하고 약 3~6mm의 초정밀 오차율을 달성함. 시각화 결과 탁구대 반사 및 바닥 충돌(Z=-0.76)이 물리 엔진과 99% 동일하게 렌더링됨. 딥러닝 특성(연속 함수)상 바운드 순간의 뾰족한 V자가 미세하게 둥글려지는 1%의 스무딩 현상은 남았으나 시뮬레이션용으로 완벽히 합격점.
-   ![시도 16 안정권 돌입](/root/myresearch/attempt16_silu.png)
+   ![시도 16 안정권 돌입](results/attempt16_silu.png)
 
 17. **시도 17 (가우시안 정규 분포 기반 데이터셋 밀도 최적화):**
     - **날짜:** 2026-06-04
@@ -220,7 +220,7 @@ speed = np.random.uniform(1.0, 80.0)
     - **내용:** 탁구대 바운스 구간에 가중치를 부여하려던 초기 계획은 모델의 궤적 회피 위험성으로 인해 훈련 전 폐기함. 대신 스무딩의 진짜 주범인 `SmoothL1Loss`를 버리고 정직한 `순수 L1Loss`로 완전히 되돌아옴. 추가로 푸리에 위치 인코딩의 주파수 대역(`num_freqs=10`)이 나이퀴스트 한계(1.95프레임 파장)에 아슬아슬하게 걸쳐 있는 완벽한 샤프펜슬 두께임을 확인하고 그대로 훈련을 진행.
     - **목적:** 중앙값을 쫓아가는 순수 L1 Loss와 극한의 고주파수 해상도의 시너지를 통해 모델 스스로 가장 날카로운 1프레임 V자 바운스를 수학적으로 복원하게 만듦.
     - **결과:** 탁구대 위에서의 실제 바운스는 의도한 대로 거의 완벽하게 날카로운 V자로 살아남(스무딩 해결). 하지만 푸리에 고주파수 대역폭(num_freqs=10)을 한계치까지 확장한 부작용으로, 바운스가 없어야 할 허공이나 탁구대 밖 맨바닥 궤적에서도 선이 뾰족하게 요동치거나 가짜 바운스(Phantom Bounces / Rippling Artifacts)가 다발적으로 발생하는 치명적인 고주파수 과적합 현상이 새로 나타남.
-     ![시도 19 안정권 돌입](/root/myresearch/attempt19_fourier_freq10_pure_l1.png)
+     ![시도 19 안정권 돌입](results/attempt19_fourier_freq10_pure_l1.png)
 ---
 
 ## 📁 디렉토리 구조 (최신화 완료)
