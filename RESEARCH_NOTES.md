@@ -21,7 +21,7 @@
   - 기존의 Z=0 무한 평면 반사 가정을 폐기하고, **절대 월드 좌표계**를 도입함.
   - **탁구대 경계:** `|X| <= 0.76m`, `|Y| <= 1.37m` 내에서만 Z=0 충돌을 감지함. 해당 영역을 벗어나면 바닥(`Z=-0.76m`)까지 자유 낙하하도록 구현함.
   - **네트 충돌(Soft Wall):** 공이 중앙(`Y=0`)을 지날 때 네트 높이(`Z <= 0.1525m`) 이하일 경우 네트에 걸리며, 네트 장력을 받아 `Vy`가 반전 및 감쇠되는 현실적인 텐션 로직을 구현함.
-- **데이터 추출:** 무작위로 샘플링된 500만 개의 입력을 물리 엔진에 인가하여 정답지 세트를 추출함. (`dataset_random.npz`로 저장)
+- **데이터 추출:** 무작위로 샘플링된 500만 개의 입력을 물리 엔진에 인가하여 정답지 세트를 추출함. (`dataset_gaussian_mixed.npz`로 저장)
 
 ### Step 2. AI 물리 모델 아키텍처 진화 (Evolution of Physics Decoder)
 - **파일:** `train_baseline.py`
@@ -188,10 +188,10 @@
     - **결과:** V자 형태 구현이 가장 우수하게 나타났으나, 오차율이 0.02 수준에 머무르고 궤적이 다소 불안정하여 공이 튀는 현상이 간헐적으로 발생함.
     ![시도 15 V자 해결 및 궤도불안정](results/attempt15_deep_res_fourier.png)
 
-16. **시도 16 (완벽한 마스킹, SiLU, 최적화 모델 스케일링):**
+16. **시도 16 (패딩 마스킹 개선, SiLU, 최적화 모델 스케일링):**
     - **날짜:** 2026-06-03
-    - **내용:** 마스킹 버그(`cumsum <= 1`)를 `cummax` 기반 로직으로 완벽히 수정. 활성화 함수를 `ReLU`에서 `SiLU`로 교체하여 부드러운 보간 극대화. 메모리 최적화를 위해 폭을 256으로 축소하고 배치 사이즈를 1024로 조정.
-    - **결과:** **목표 달성 (Test MAE 0.0067 / Train MAE 0.0032)!** 바운스 이후의 노이즈 데이터를 완벽히 차단(Masking)하여 약 3~6mm의 초정밀 오차율을 기록함. 탁구대 반사 및 바닥 충돌 시 시각적으로 유사한 궤적을 확인함. 딥러닝의 연속 함수 특성상 바운드 순간의 V자가 미세하게 둥글어지는 1%의 스무딩 현상은 잔존하나 시뮬레이션 용도로 적합함.
+    - **내용:** 마스킹 버그(`cumsum <= 1`)를 `cummax` 기반 로직으로 수정. 활성화 함수를 `ReLU`에서 `SiLU`로 교체하여 부드러운 보간 극대화. 메모리 최적화를 위해 폭을 256으로 축소하고 배치 사이즈를 1024로 조정.
+    - **결과:** **목표 달성 (Test MAE 0.0067 / Train MAE 0.0032)!** 바운스 이후의 노이즈 데이터를 차단(Masking)하여 약 3~6mm의 초정밀 오차율을 기록함. 탁구대 반사 및 바닥 충돌 시 시각적으로 유사한 궤적을 확인함. 딥러닝의 연속 함수 특성상 바운드 순간의 V자가 미세하게 둥글어지는 미세한 스무딩 현상은 잔존하나 시뮬레이션 용도로 적합함.
     ![시도 16 안정권 돌입](results/attempt16_silu.png)
 
 17. **시도 17 (가우시안 정규 분포 기반 데이터셋 밀도 최적화):**
@@ -204,9 +204,9 @@
     - **날짜:** 2026-06-07
     - **내용:** 궤적 길이를 500스텝(1.0초)에서 750스텝(1.5초)으로 연장. 이상치 뭉침 현상 방지를 위해 범위를 벗어나면 재샘플링하는 기각 샘플링(Truncated Normal) 도입. 이상치에 강건한 `SmoothL1Loss`(Huber Loss) 적용.
     - **목적:** 장기 궤적 예측 능력 확보 및 경계선 데이터 뭉침 원천 차단을 통해 극단적 이상치에서의 정밀도 향상.
-    - **결과:** 338 에포크 조기 조기 종료. Test MAE **0.00053 (0.53mm)**로 수치상 역대 최고 정밀도 달성. 그러나 시각화 결과 바운드 지점이 둥근 U자로 심하게 뭉개지는(Over-smoothing) 현상이 발생하여 시도 17 대비 시각적 품질은 하락함.
+    - **결과:** 338 에포크 조기 종료. Test MAE **0.00053 (0.53mm)**로 수치상 역대 최고 정밀도 달성. 그러나 시각화 결과 바운드 지점이 둥근 U자로 심하게 뭉개지는(Over-smoothing) 현상이 발생하여 시도 17 대비 시각적 품질은 하락함.
 
-19. **시도 19 (나이퀴스트 한계 주파수 보장 & 순수 L1 Loss 롤백):**
+19. **시도 19 (고주파 표현 확장 & 순수 L1 Loss 롤백):**
     - **날짜:** 2026-06-11
     - **내용:** 스무딩의 원인인 `SmoothL1Loss`를 제거하고 `순수 L1Loss`로 복귀. 푸리에 위치 인코딩의 주파수 대역(`num_freqs=10`)을 통해 고주파 표현 범위를 확장하여 훈련 진행.
     - **목적:** 순수 L1 Loss와 극한의 고주파수 해상도의 시너지를 통해 모델 스스로 날카로운 1프레임 V자 바운스를 복원하도록 유도.
@@ -215,7 +215,7 @@
 
 ---
 
-## 📁 디렉토리 구조 (최신화 완료)
+## 📁 디렉토리 구조
 
 ```
 /root/tabletennis_trajec_model/
@@ -225,11 +225,14 @@
 ├── RESEARCH_NOTES.md         # 이 연구 노트
 └── database/
     ├── dataset_random.npz                 # 기존 균등 분포 정답지
-    ├── dataset_gaussian_mixed.npz         # [New] 정규 분포 최적화 정답지 (시도 17)
+    ├── dataset_gaussian_mixed.npz         # [New] 정규 분포 최적화 정답지 (시도 17 이후)
+    ├── ... (시도 1~15 이전 모델 파일들 생략)
     ├── mlp_norm_standard_random_attempt16_scaled_mlp.npy
     ├── mlp_standard_random_attempt16_scaled_mlp.pth
     ├── mlp_norm_standard_gaussian_mixed_attempt17_gaussian_mixed.npy
     ├── mlp_standard_gaussian_mixed_attempt17_gaussian_mixed.pth
     ├── mlp_norm_standard_gaussian_mixed_attempt18_truncnorm.npy
-    └── mlp_standard_gaussian_mixed_attempt18_truncnorm.pth
+    ├── mlp_standard_gaussian_mixed_attempt18_truncnorm.pth
+    ├── mlp_norm_standard_gaussian_mixed_attempt19_fourier_freq10_pure_l1.npy
+    └── mlp_standard_gaussian_mixed_attempt19_fourier_freq10_pure_l1.pth
 ```
