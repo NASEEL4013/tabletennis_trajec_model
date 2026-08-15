@@ -1,4 +1,4 @@
-Table Tennis Trajectory Surrogate Model
+#Table Tennis Trajectory Surrogate Model
 
 SciPy `solve_ivp` 기반 탁구공 물리엔진의 궤도 계산을 신경망으로 근사한 개인 연구 프로젝트입니다. 8개의 초기 물리조건과 시간 `t`를 입력받아 해당 시점의 3D 좌표를 예측하고, 750개 시점을 배치 추론하여 1.5초 궤도를 생성합니다.
 
