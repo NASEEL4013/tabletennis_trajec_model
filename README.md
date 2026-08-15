@@ -1,4 +1,4 @@
-#Table Tennis Trajectory Surrogate Model
+# Table Tennis Trajectory Surrogate Model
 
 SciPy `solve_ivp` 기반 탁구공 물리엔진의 궤도 계산을 신경망으로 근사한 개인 연구 프로젝트입니다. 8개의 초기 물리조건과 시간 `t`를 입력받아 해당 시점의 3D 좌표를 예측하고, 750개 시점을 배치 추론하여 1.5초 궤도를 생성합니다.
 
@@ -15,7 +15,7 @@ SciPy `solve_ivp` 기반 탁구공 물리엔진의 궤도 계산을 신경망으
 | 평균 궤적 오차 | MAE 4.62 mm, RMSE 6.99 mm | 유효 구간의 3D 점 간 거리 |
 | 속도 상위 5% | MAE 4.73 mm | 50개 궤적 |
 | 스핀 크기 상위 5% | MAE 3.57 mm | 50개 궤적 |
-| CPU 단일 궤적 지연시간 | 7.65 ms → 1.42 ms | 약 5.3배 단축 |
+| CPU 단일 궤적 지연시간 | 7.65 ms → 1.42 ms | 지연시간 81.4% 감소(추론 속도 약 5.3배 향상) |
 | GPU 배치 처리량 | 131개/s → 8,780개/s | RTX 3070, batch 500, 약 67배 |
 
 - CPU 결과는 Intel Core i7-10700KF에서 1,000개 궤적을 순차 추론한 평균 지연시간입니다.
