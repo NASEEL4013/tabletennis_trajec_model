@@ -61,30 +61,21 @@ flowchart LR
 
 ## 실행 방법
 
-> 이 저장소에는 용량이 큰 데이터셋, 모델 가중치와 정규화 파일이 포함되어 있지 않습니다. 가중치 없이 실행한 `app.py`의 AI 출력은 유효한 결과가 아닙니다.
+공개 모델 가중치와 정규화 파일은 각각 `artifacts/final_model.pth`, `artifacts/final_norm.npy`에 있습니다. 전체 500만 개 학습 데이터셋은 용량 때문에 포함하지 않았습니다.
 
 1. 의존성을 설치합니다.
 
    ```bash
-   pip install numpy scipy torch gradio plotly psutil tqdm
+   pip install -r requirements.txt
    ```
 
-2. 각 스크립트의 `DB_DIR`을 로컬 데이터 경로로 변경하고 다음 파일을 배치합니다.
-
-   ```text
-   dataset_gaussian_mixed.npz
-   mlp_standard_gaussian_mixed_attempt19_fourier_freq10_pure_l1.pth
-   mlp_norm_standard_gaussian_mixed_attempt19_fourier_freq10_pure_l1.npy
-   ```
-
-3. 시뮬레이터 또는 벤치마크를 실행합니다.
+2. 공개 파일을 사용하는 시뮬레이터를 실행합니다.
 
    ```bash
    python app.py
-   python benchmark.py --samples 1000
    ```
 
-`generate_dataset.py`는 기본 설정에서 500만 개 궤적을 생성하므로 충분한 저장공간과 실행시간이 필요합니다.
+공개 파일만으로 모델 추론은 가능하지만, 과거 벤치마크에 사용한 동일 평가 표본의 재현은 이번 공개 범위에 포함되지 않습니다. `generate_dataset.py`는 기본 설정에서 500만 개 궤적을 생성하므로 충분한 저장공간과 실행시간이 필요합니다.
 
 ## 주요 파일
 

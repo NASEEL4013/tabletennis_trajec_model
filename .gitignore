@@ -3,6 +3,8 @@ __pycache__/
 *.pth
 *.npy
 *.npz
+!artifacts/final_model.pth
+!artifacts/final_norm.npy
 *.md
 !README.md
 !RESEARCH_NOTES.md

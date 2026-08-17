@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from scipy.integrate import solve_ivp
 
 DB_DIR    = "/root/myresearch/database"
+ARTIFACT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifacts")
 K_MAGNUS  = 0.0034   # 실제 탁구공 물리 데이터 기반 도출
 K_DRAG    = 0.112    
 
@@ -61,7 +62,7 @@ class TimeConditionedMLP(nn.Module):
 device = torch.device("cpu") # 공정한 속도 벤치마크를 위해 CPU로 강제 고정
 
 model_random = TimeConditionedMLP().to(device)
-model_path = os.path.join(DB_DIR, "mlp_standard_gaussian_mixed_attempt19_fourier_freq10_pure_l1.pth")
+model_path = os.path.join(ARTIFACT_DIR, "final_model.pth")
 if os.path.exists(model_path):
     try:
         model_random.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
@@ -69,7 +70,7 @@ if os.path.exists(model_path):
         print(f"Warning: Skipping weight load due to mismatch: {e}")
 model_random.eval()
 
-norm_path = os.path.join(DB_DIR, "mlp_norm_standard_gaussian_mixed_attempt19_fourier_freq10_pure_l1.npy")
+norm_path = os.path.join(ARTIFACT_DIR, "final_norm.npy")
 if os.path.exists(norm_path):
     norm_random = np.load(norm_path)
 else:
